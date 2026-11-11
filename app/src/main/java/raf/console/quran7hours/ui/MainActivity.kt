@@ -112,6 +112,7 @@ private fun Quran7HoursScreen(activity: MainActivity) {
     val learningDb = remember { LearningDatabase(context).also { it.migrateLegacyBookmarks() } }
     val catalogDetails = remember { CatalogDetails(context) }
     val tafsir = remember { TafsirStore(context) }
+    val quranScript = remember { TafsirQuranScript(context) }
     val wordStore = remember { WordByWordStore(context) }
     val timings = remember { TimingCatalog(context) }
     val hadrConnection = remember { AudioConnection(context, AudioChannel.HADR) }
@@ -841,7 +842,9 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                     )
                     SheetSection.TAFSIR -> TafsirPanel(
                         prefs = prefs,
-                        page = page, store = tafsir, wordStore = wordStore,
+                        page = page, store = tafsir,
+                        quranScript = quranScript, tajweed = tajweed,
+                        wordStore = wordStore,
                         playback = ayahSnapshot, controller = ayahController,
                         reciters = reciters, reciterError = reciterError,
                         selectedReciter = selectedReciter,

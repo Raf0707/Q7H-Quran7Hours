@@ -1,6 +1,5 @@
 package raf.console.quran7hours.ui
 
-import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -45,8 +44,15 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 import raf.console.quran7hours.data.*
@@ -66,7 +72,7 @@ internal fun LearningBookmarkIcon(icon: String, tint: Color, modifier: Modifier 
     Icon(art, contentDescription = null, tint = tint, modifier = modifier)
 }
 
-/** Centered bookmark dialog; independent of the toolbar button position. */
+/** A compact dropdown-style popup positioned at the center of the window, not the toolbar. */
 @Composable
 internal fun LearningBookmarkMenu(
     expanded: Boolean,
@@ -81,86 +87,128 @@ internal fun LearningBookmarkMenu(
 ) {
     if (!expanded) return
 
-    Dialog(
+    // Popup is hosted inside the RTL toolbar. Place it in WINDOW coordinates so
+    // its center doesn't follow the bookmark button on the right of the screen.
+    val centerOfWindow = remember {
+        object : PopupPositionProvider {
+            override fun calculatePosition(
+                anchorBounds: IntRect,
+                windowSize: IntSize,
+                layoutDirection: LayoutDirection,
+                popupContentSize: IntSize
+            ): IntOffset = IntOffset(
+                x = (windowSize.width - popupContentSize.width) / 2,
+                y = (windowSize.height - popupContentSize.height) / 2
+            )
+        }
+    }
+    val configuration = LocalConfiguration.current
+    val popupWidth = minOf(configuration.screenWidthDp.dp * 0.90f, 400.dp)
+    val popupHeight = minOf(configuration.screenHeightDp.dp * 0.76f, 560.dp)
+
+    Popup(
+        popupPositionProvider = centerOfWindow,
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = PopupProperties(
+            focusable = true,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true
+        )
     ) {
-        Surface(
-            modifier = Modifier
-                .widthIn(max = 420.dp)
-                .fillMaxWidth(0.9f)
-                .heightIn(max = 560.dp),
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surface,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            tonalElevation = 6.dp,
-            shadowElevation = 14.dp
-        ) {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState())
+        // Reader's toolbar is RTL; menu actions should read LEFT to RIGHT:
+        // bookmark icon + description at the left, edit pencil at the right.
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+            Surface(
+                modifier = Modifier.width(popupWidth).heightIn(max = popupHeight),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                tonalElevation = 5.dp,
+                shadowElevation = 12.dp
             ) {
-                Text(
-                    "Закладки · страница $page",
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.padding(16.dp)
-                )
-                types.forEachIndexed { i, type ->
-                    if (i == 8) {
-                        HorizontalDivider()
-                        Text(
-                            "Назначения",
-                            style = MaterialTheme.typography.labelLarge,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                        )
-                    }
-                    val selected = bookmarks.any { it.page == page && it.typeId == type.id }
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        "Закладки · страница $page",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
+                    )
+                    // The delete action remains first, before the color choices.
+                    // Do not show it when the current page has no bookmarks.
+                    if (bookmarks.any { it.page == page }) {
                         DropdownMenuItem(
-                            text = {
-                                Column {
-                                    Text(
-                                        type.name,
-                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                    if (type.purpose.isNotBlank()) Text(
-                                        type.purpose,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        maxLines = 2
-                                    )
-                                }
-                            },
-                            leadingIcon = {
-                                LearningBookmarkIcon(type.icon, Color(type.color.toInt()))
-                            },
-                            trailingIcon = {
-                                if (selected) Icon(Icons.Default.Check, "Выбрана")
-                            },
-                            onClick = { onToggle(type) },
-                            modifier = Modifier.weight(1f)
+                            text = { Text("Удалить закладку") },
+                            leadingIcon = { Icon(Icons.Default.DeleteOutline, contentDescription = null) },
+                            onClick = onRemove
                         )
-                        IconButton(onClick = { onEdit(type) }, modifier = Modifier.size(40.dp)) {
-                            Icon(
-                                Icons.Default.Edit,
-                                "Изменить: ${type.name}",
-                                modifier = Modifier.size(19.dp)
+                        HorizontalDivider()
+                    }
+                    types.forEachIndexed { index, type ->
+                        if (index == 8) {
+                            HorizontalDivider()
+                            Text(
+                                "Назначения",
+                                style = MaterialTheme.typography.labelLarge,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                             )
                         }
+                        val selected = bookmarks.any { it.page == page && it.typeId == type.id }
+                        Row(
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f).clickable { onToggle(type) }
+                                    .padding(start = 16.dp, end = 4.dp, top = 9.dp, bottom = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                LearningBookmarkIcon(
+                                    icon = type.icon,
+                                    tint = Color(type.color.toInt()),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(Modifier.width(14.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        type.name,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                        maxLines = 1
+                                    )
+                                    if (type.purpose.isNotBlank()) {
+                                        Text(
+                                            type.purpose,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            maxLines = 2
+                                        )
+                                    }
+                                }
+                                if (selected) {
+                                    Spacer(Modifier.width(6.dp))
+                                    Icon(
+                                        Icons.Default.Check,
+                                        contentDescription = "Выбрана",
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                            // Separate hit target: tapping the pencil edits, never toggles.
+                            IconButton(
+                                onClick = { onEdit(type) },
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Edit,
+                                    contentDescription = "Изменить: ${type.name}",
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(Modifier.width(6.dp))
+                        }
                     }
-                }
-                HorizontalDivider()
-                DropdownMenuItem(
-                    text = { Text("Свой цвет и закладка") },
-                    leadingIcon = { Icon(Icons.Default.AddCircleOutline, null) },
-                    onClick = onCreate
-                )
-                // As in the previous implementation, deleting is available only
-                // when this page actually contains one or more bookmarks.
-                if (bookmarks.any { it.page == page }) {
                     HorizontalDivider()
                     DropdownMenuItem(
-                        text = { Text("Удалить закладку") },
-                        leadingIcon = { Icon(Icons.Default.DeleteOutline, null) },
-                        onClick = onRemove
+                        text = { Text("Свой цвет и закладка") },
+                        leadingIcon = { Icon(Icons.Default.AddCircleOutline, contentDescription = null) },
+                        onClick = onCreate
                     )
                 }
             }
@@ -468,7 +516,6 @@ private fun HafizVerseCard(verse: TafsirStore.Verse, db: LearningDatabase) {
 }
 
 /** Brush strokes remain in image-relative coordinates, never baked into Qur'an WebP. */
-@SuppressLint("UnusedBoxWithConstraintsScope")
 @Composable
 internal fun InkPageLayer(
     bitmap: Bitmap,

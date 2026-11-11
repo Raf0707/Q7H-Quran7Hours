@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import androidx.media3.session.MediaController
 import raf.console.quran7hours.data.MushafStore
 import raf.console.quran7hours.data.QuranCatalog
+import raf.console.quran7hours.data.TafsirQuranScript
 import raf.console.quran7hours.data.TafsirStore
 import raf.console.quran7hours.data.WordByWordStore
 import raf.console.quran7hours.data.UserPreferences
@@ -268,6 +269,8 @@ fun TafsirPanel(
     prefs: UserPreferences,
     page: Int,
     store: TafsirStore,
+    quranScript: TafsirQuranScript,
+    tajweed: Boolean,
     wordStore: WordByWordStore,
     playback: PlaybackSnapshot,
     controller: MediaController?,
@@ -291,6 +294,8 @@ fun TafsirPanel(
     ) {
         value = verses?.let { wordStore.forPage(page, it) }.orEmpty()
     }
+    // Surah tajweed is read entirely from local assets/quran/data/surahs/*.json.
+    // No network fetch or second Quran text source is needed.
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
         // Quran navigation: next page is to the LEFT, previous page to the RIGHT.
         // Keep buttons apart so they cannot be accidentally pressed together.
@@ -358,10 +363,16 @@ fun TafsirPanel(
                                 onPlay = { onPlayVerse(verse.surah, verse.ayah) }
                             )
                         }
-                        if (verse.arabic.isNotBlank()) {
-                            Text(verse.arabic, modifier = Modifier.fillMaxWidth(),
-                                fontSize = 25.sp, lineHeight = 43.sp, textAlign = TextAlign.Right,
-                                style = TextStyle(textDirection = TextDirection.Rtl))
+                        // Use one local Unicode text source for both modes.
+                        // `ar` = plain; `tw` = identical characters with tajweed markup.
+                        // The existing `tajweed` parameter is controlled by the Mushaf setting.
+                        if (verse.arabic.isNotBlank() || (verse.surah in 1..114 && verse.ayah > 0)) {
+                            TafsirLocalTajweedText(
+                                surah = verse.surah,
+                                ayah = verse.ayah,
+                                fallbackArabic = verse.arabic,
+                                tajweed = tajweed
+                            )
                         }
                         AyahWordDictionary(
                             verse.surah, verse.ayah,
