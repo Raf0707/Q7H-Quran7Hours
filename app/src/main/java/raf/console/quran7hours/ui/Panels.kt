@@ -294,8 +294,20 @@ fun TafsirPanel(
     ) {
         value = verses?.let { wordStore.forPage(page, it) }.orEmpty()
     }
-    // Surah tajweed is read entirely from local assets/quran/data/surahs/*.json.
-    // No network fetch or second Quran text source is needed.
+    val quranVerses by produceState<Map<Pair<Int, Int>, TafsirQuranScript.Ayah>>(
+        emptyMap(), page, verses
+    ) {
+        value = verses?.let { quranScript.forPage(it) }.orEmpty()
+    }
+    // Original QPC V4/V2 glyphs from the earlier Quran7Hours app.
+    // These are page-specific fonts, not Unicode text colored with SpanStyle.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val originalQpc = remember(context) { OriginalQpcTafsirRepository(context) }
+    val qpcVerses by produceState<Map<Pair<Int, Int>, OriginalQpcAyah>>(
+        emptyMap(), page, verses
+    ) {
+        value = verses?.let { originalQpc.forPage(page, it) }.orEmpty()
+    }
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
         // Quran navigation: next page is to the LEFT, previous page to the RIGHT.
         // Keep buttons apart so they cannot be accidentally pressed together.
@@ -308,6 +320,14 @@ fun TafsirPanel(
             IconButton(onClick = onPrevious, enabled = page > 1) {
                 Icon(Icons.Default.ChevronRight, "Предыдущая страница")
             }
+        }
+        if (tajweed && !originalQpc.isPackComplete()) {
+            Text(
+                "Оригинальный QPC V4 не установлен. Для цветного таджвида запусти INSTALL_FROM_OLD.bat.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+            )
         }
         val loadedVerses = verses
         if (loadedVerses == null) {
@@ -363,16 +383,23 @@ fun TafsirPanel(
                                 onPlay = { onPlayVerse(verse.surah, verse.ayah) }
                             )
                         }
-                        // Use one local Unicode text source for both modes.
-                        // `ar` = plain; `tw` = identical characters with tajweed markup.
-                        // The existing `tajweed` parameter is controlled by the Mushaf setting.
-                        if (verse.arabic.isNotBlank() || (verse.surah in 1..114 && verse.ayah > 0)) {
-                            TafsirLocalTajweedText(
-                                surah = verse.surah,
-                                ayah = verse.ayah,
-                                fallbackArabic = verse.arabic,
-                                tajweed = tajweed
-                            )
+                        if (verse.arabic.isNotBlank() || quranVerses[verse.surah to verse.ayah] != null) {
+                            val key = verse.surah to verse.ayah
+                            val original = qpcVerses[key]
+                            if (original != null) {
+                                // Color is embedded in the real QPC V4 font;
+                                // the matching V2 font is used with Tajweed off.
+                                OriginalQpcTafsirText(original, tajweed)
+                            } else {
+                                // No QPC pack or incomplete/mismatched ayah:
+                                // keep the user's original Unicode font, without
+                                // inventing a 'classic' Tajweed palette.
+                                TafsirQuranText(
+                                    arabicFromAzan = verse.arabic,
+                                    verified = quranVerses[key],
+                                    tajweed = false
+                                )
+                            }
                         }
                         AyahWordDictionary(
                             verse.surah, verse.ayah,

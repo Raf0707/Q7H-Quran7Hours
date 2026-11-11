@@ -1,9 +1,9 @@
+
 package raf.console.quran7hours.ui
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.graphics.Typeface
-import android.text.Layout
-import android.text.SpannableString
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
@@ -13,247 +13,301 @@ import android.view.Gravity
 import android.view.View
 import android.widget.TextView
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import raf.console.quran7hours.data.TafsirHafsTypeface
-import java.util.LinkedHashMap
-import java.util.Locale
+import raf.console.quran7hours.data.UserPreferences
+import java.util.concurrent.ConcurrentHashMap
 
-/**
- * Offline tafsir Quran source. These are the ORIGINAL surah JSON files from
- * Quran7HoursGrantUpd: assets/quran/data/surahs/001.json ... 114.json.
- *
- * - ayahs[].a: verse number (the Hanafi numbering of al-Fatiha is preserved)
- * - ayahs[].ar: Unicode Arabic without colored rules
- * - ayahs[].tw: SAME Unicode Arabic with <tajweed class=...> tags
- *
- * Only the lightweight ar/tw fields are cached, not the large tafsir bodies.
- * No network, no HTML WebView, no PUA/QCF4 font substitutions.
- */
-private data class OfflineTafsirAyah(val arabic: String, val tagged: String)
+private data class LocalAyah(
+    val ar: String,
+    val tw: String
+)
 
-private object OfflineSurahTajweed {
-    private const val CACHE_LIMIT = 8
-    private val cacheLock = Any()
-    private val cache = object : LinkedHashMap<Int, Map<Int, OfflineTafsirAyah>>(
-        16, 0.75f, true
-    ) {
-        override fun removeEldestEntry(
-            eldest: MutableMap.MutableEntry<Int, Map<Int, OfflineTafsirAyah>>?
-        ): Boolean = size > CACHE_LIMIT
-    }
+private object LocalSurahRepository {
+    private val cache =
+        ConcurrentHashMap<Int, Map<Int, LocalAyah>>()
 
-    suspend fun get(context: Context, surah: Int, ayah: Int): OfflineTafsirAyah? =
-        withContext(Dispatchers.IO) {
-            if (surah !in 1..114 || ayah !in 1..286) return@withContext null
-            val saved = synchronized(cacheLock) { cache[surah] }
-            val verses = saved ?: load(context.applicationContext, surah).also { loaded ->
-                synchronized(cacheLock) { cache[surah] = loaded }
+    fun get(
+        context: Context,
+        surah: Int,
+        ayah: Int
+    ): LocalAyah? {
+        if (surah !in 1..114 || ayah < 1) return null
+
+        val verses = cache.getOrPut(surah) {
+            try {
+                val filename =
+                    "quran/data/surahs/%03d.json".format(surah)
+
+                val jsonText = context.assets.open(filename)
+                    .bufferedReader(Charsets.UTF_8)
+                    .use { it.readText() }
+
+                val array = JSONObject(jsonText)
+                    .optJSONArray("ayahs")
+                    ?: return@getOrPut emptyMap()
+
+                buildMap {
+                    for (i in 0 until array.length()) {
+                        val item = array.optJSONObject(i) ?: continue
+                        val number = item.optInt("a", 0)
+                        val plain = item.optString("ar")
+                        val marked = item.optString("tw")
+
+                        if (number > 0 && plain.isNotBlank()) {
+                            put(number, LocalAyah(plain, marked))
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(
+                    "Q7H-TafsirTajweed",
+                    "Cannot read surah $surah",
+                    e
+                )
+                emptyMap()
             }
-            verses[ayah]
         }
 
-    private fun load(context: Context, surah: Int): Map<Int, OfflineTafsirAyah> {
-        val path = "quran/data/surahs/%03d.json".format(Locale.ROOT, surah)
-        return try {
-            val json = context.assets.open(path).bufferedReader(Charsets.UTF_8).use { it.readText() }
-            val root = JSONObject(json)
-            require(root.optInt("id") == surah) { "Wrong surah id in $path" }
-            val array = root.getJSONArray("ayahs")
-            val result = LinkedHashMap<Int, OfflineTafsirAyah>(array.length())
-            for (i in 0 until array.length()) {
-                val row = array.getJSONObject(i)
-                val number = row.optInt("a", 0)
-                val arabic = row.optString("ar")
-                val tagged = row.optString("tw")
-                if (number <= 0 || arabic.isBlank()) continue
-                result[number] = OfflineTafsirAyah(arabic, tagged)
-            }
-            result
-        } catch (e: Exception) {
-            Log.e("Q7HTafsirLocal", "Cannot read $path", e)
-            emptyMap()
-        }
+        return verses[ayah]
     }
 }
 
-/**
- * Parse only the two known inline elements in `tw`:
- * <tajweed class=rule>...content...</tajweed> and
- * <span class=end>verse number</span>. The latter is NOT Quran text.
- *
- * Fail closed: if stripping markup does not reproduce `ar` exactly, show `ar`
- * WITHOUT coloring, never a damaged or silently altered Quran verse.
- */
-internal object LocalTajweedMarkup {
-    private val tag = Regex("""<(/?)([A-Za-z]+)([^>]*)>""", RegexOption.IGNORE_CASE)
-    private val clazz = Regex(
-        """\bclass\s*=\s*(?:\"([^\"]+)\"|'([^']+)'|([a-zA-Z0-9_-]+))""",
+private object TajweedMarkup {
+    private val tagRegex = Regex(
+        """</?tajweed\b[^>]*>""",
         RegexOption.IGNORE_CASE
     )
 
-    private fun ruleColor(rule: String, dark: Boolean): Int? {
-        val color = if (dark) when (rule.lowercase(Locale.ROOT)) {
-            "ham_wasl", "slnt", "laam_shamsiyah", "idgh_mus" -> 0xFFBDBDBDL
-            "madda_normal" -> 0xFF93B7FFL
-            "madda_permissible" -> 0xFF9F9BFFL
-            "madda_necessary" -> 0xFF9DADFFL
-            "madda_obligatory", "madda_pbligatory" -> 0xFF80A0FFL
-            "qlq" -> 0xFFFF7377L
-            "ikhf", "ikhf_shfw" -> 0xFFE6A0F3L
-            "idgh_ghn", "idgh_w_ghn" -> 0xFF67E1A8L
-            "idghm_shfw" -> 0xFFA1DF6BL
-            "iqlb" -> 0xFF70DDFCL
-            "ghn" -> 0xFFFFAD6FL
-            else -> return null
-        } else when (rule.lowercase(Locale.ROOT)) {
-            "ham_wasl", "slnt", "laam_shamsiyah", "idgh_mus" -> 0xFF858585L
-            "madda_normal" -> 0xFF537FFFL
-            "madda_permissible" -> 0xFF4050FFL
-            "madda_necessary" -> 0xFF000EBCL
-            "madda_obligatory", "madda_pbligatory" -> 0xFF2144C1L
-            "qlq" -> 0xFFDD0008L
-            "ikhf", "ikhf_shfw" -> 0xFF9400A8L
-            "idgh_ghn", "idgh_w_ghn" -> 0xFF169777L
-            "idghm_shfw" -> 0xFF58B800L
-            "iqlb" -> 0xFF137DB0L
-            "ghn" -> 0xFFC35D07L
-            else -> return null
+    private val classRegex = Regex(
+        """class\s*=\s*['"]?([a-zA-Z0-9_-]+)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private fun color(name: String, dark: Boolean): Int? {
+        val lightColor = when (name.lowercase()) {
+            "ham_wasl", "laam_shamsiyah", "slnt" ->
+                0xFF888888
+
+            "madda_normal" -> 0xFF2476CC
+            "madda_permissible" -> 0xFF4268D5
+            "madda_obligatory" -> 0xFF1848B8
+            "madda_necessary" -> 0xFF9233AE
+
+            "qlq", "qalqalah" -> 0xFFD22537
+
+            "ghn", "ghunnah" -> 0xFFE07822
+
+            "ikhf", "ikhf_shfw" -> 0xFF9B54A9
+
+            "iqlb", "iqlab" -> 0xFFAB3683
+
+            "idgh_ghn", "idgh_w_ghn",
+            "idgh_mus", "idghm_shfw" -> 0xFF168052
+
+            else -> null
         }
-        return color.toInt()
+
+        if (!dark) return lightColor as Int?
+
+        return when (name.lowercase()) {
+            "ham_wasl", "laam_shamsiyah", "slnt" ->
+                0xFFB0B0B0
+
+            "madda_normal", "madda_permissible",
+            "madda_obligatory" -> 0xFF86ACFF
+
+            "madda_necessary" -> 0xFFDA94F0
+
+            "qlq", "qalqalah" -> 0xFFFF7480
+
+            "ghn", "ghunnah" -> 0xFFFFB46B
+
+            "ikhf", "ikhf_shfw" -> 0xFFDCA3EC
+
+            "iqlb", "iqlab" -> 0xFFEF91CE
+
+            "idgh_ghn", "idgh_w_ghn",
+            "idgh_mus", "idghm_shfw" -> 0xFF7EDCB0
+
+            else -> lightColor
+        } as Int?
     }
 
-    fun build(arabic: String, markup: String, enabled: Boolean, dark: Boolean): CharSequence {
-        if (!enabled || markup.isBlank()) return arabic
-        val output = SpannableStringBuilder()
-        val rules = ArrayList<String>()
-        var skipMarker = false
-        var malformed = false
-        var cursor = 0
+    fun render(
+        plain: String,
+        marked: String,
+        enabled: Boolean,
+        dark: Boolean
+    ): CharSequence {
+        if (!enabled || marked.isBlank()) return plain
 
-        fun addText(fragment: String) {
-            if (fragment.isEmpty() || skipMarker) return
-            val start = output.length
-            output.append(fragment)
-            rules.lastOrNull()?.let { rule ->
-                ruleColor(rule, dark)?.let { color ->
-                    output.setSpan(
-                        ForegroundColorSpan(color),
+        val result = SpannableStringBuilder()
+        val activeClasses = mutableListOf<String>()
+        var cursor = 0
+        var invalid = false
+
+        fun appendText(text: String) {
+            if (text.isEmpty()) return
+
+            val start = result.length
+            result.append(text)
+
+            activeClasses.lastOrNull()
+                ?.let { color(it, dark) }
+                ?.let { rgb ->
+                    result.setSpan(
+                        ForegroundColorSpan(rgb),
                         start,
-                        output.length,
+                        result.length,
                         Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
                     )
                 }
-            }
         }
 
-        for (match in tag.findAll(markup)) {
-            addText(markup.substring(cursor, match.range.first))
-            val closing = match.groupValues[1] == "/"
-            val name = match.groupValues[2].lowercase(Locale.ROOT)
-            val attr = match.groupValues[3]
-            when (name) {
-                "tajweed" -> {
-                    if (skipMarker) {
-                        malformed = true
-                    } else if (closing) {
-                        if (rules.isEmpty()) malformed = true
-                        else rules.removeAt(rules.lastIndex)
-                    } else {
-                        val c = clazz.find(attr)
-                        val rule = c?.groupValues?.drop(1)?.firstOrNull { it.isNotEmpty() }
-                        if (rule.isNullOrBlank()) malformed = true
-                        else rules.add(rule)
-                    }
+        for (match in tagRegex.findAll(marked)) {
+            appendText(marked.substring(cursor, match.range.first))
+
+            if (match.value.startsWith("</")) {
+                if (activeClasses.isEmpty()) {
+                    invalid = true
+                } else {
+                    activeClasses.removeAt(activeClasses.lastIndex)
                 }
-                "span" -> {
-                    if (closing) {
-                        if (!skipMarker) malformed = true
-                        skipMarker = false
-                    } else {
-                        val c = clazz.find(attr)
-                        val css = c?.groupValues?.drop(1)?.firstOrNull { it.isNotEmpty() }
-                        if (skipMarker || css != "end") malformed = true
-                        else skipMarker = true
-                    }
-                }
-                else -> malformed = true
+            } else {
+                val rule = classRegex.find(match.value)
+                    ?.groupValues?.getOrNull(1).orEmpty()
+
+                activeClasses.add(rule)
             }
+
             cursor = match.range.last + 1
         }
-        addText(markup.substring(cursor))
-        if (skipMarker || rules.isNotEmpty() || malformed ||
-            output.toString() != arabic || output.toString().contains('<')
+
+        appendText(marked.substring(cursor))
+
+        // Never change or truncate the original Quran text.
+        if (invalid ||
+            activeClasses.isNotEmpty() ||
+            result.toString() != plain
         ) {
-            // Do not emit partially colored, truncated or malformed Arabic.
-            return SpannableString(arabic)
+            return plain
         }
-        return output
+
+        return result
     }
 }
 
-/** Render a single verse. This is deliberately independent of remote TafsirQuranScript. */
+private fun loadUthmanicFont(context: Context): Typeface {
+    return try {
+        Typeface.createFromAsset(
+            context.assets,
+            "quran/tafsir/UthmanicHafs1Ver18.ttf"
+        )
+    } catch (_: Exception) {
+        // Safe system fallback; never use QCF4 PUA as Unicode.
+        Typeface.create("serif", Typeface.NORMAL)
+    }
+}
+
 @Composable
 fun TafsirLocalTajweedText(
     surah: Int,
     ayah: Int,
-    fallbackArabic: String,
-    tajweed: Boolean,
+    fallback: String,
+    prefs: UserPreferences,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val verse by produceState<OfflineTafsirAyah?>(null, surah, ayah) {
-        value = OfflineSurahTajweed.get(context, surah, ayah)
-    }
-    val typeface by produceState<Typeface?>(null, context.applicationContext) {
-        value = TafsirHafsTypeface.get(context.applicationContext)
+
+    var tajweedEnabled by remember(prefs) {
+        mutableStateOf(prefs.tajweed)
     }
 
-    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.45f
-    val defaultTextColor = MaterialTheme.colorScheme.onSurface.toArgb()
-    val content = remember(verse, fallbackArabic, tajweed, dark) {
-        val source = verse
-        if (source == null) fallbackArabic else LocalTajweedMarkup.build(
-            arabic = source.arabic,
-            markup = source.tagged,
-            enabled = tajweed,
-            dark = dark
+    val shared = remember(context) {
+        context.getSharedPreferences(
+            "q7h_compose",
+            Context.MODE_PRIVATE
         )
     }
 
+    DisposableEffect(shared, prefs) {
+        val listener =
+            SharedPreferences.OnSharedPreferenceChangeListener {
+                    _, key ->
+                if (key == "tajweed") {
+                    tajweedEnabled = prefs.tajweed
+                }
+            }
+
+        shared.registerOnSharedPreferenceChangeListener(listener)
+
+        onDispose {
+            shared.unregisterOnSharedPreferenceChangeListener(listener)
+        }
+    }
+
+    val verse by produceState<LocalAyah?>(
+        null,
+        surah,
+        ayah
+    ) {
+        value = withContext(Dispatchers.IO) {
+            LocalSurahRepository.get(context, surah, ayah)
+        }
+    }
+
+    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.45f
+    val foreground = MaterialTheme.colorScheme.onSurface.toArgb()
+
+    val displayed = remember(
+        verse,
+        fallback,
+        tajweedEnabled,
+        dark
+    ) {
+        val item = verse
+
+        if (item == null) {
+            fallback
+        } else {
+            TajweedMarkup.render(
+                plain = item.ar,
+                marked = item.tw,
+                enabled = tajweedEnabled,
+                dark = dark
+            )
+        }
+    }
+
+    val arabicFont = remember(context) {
+        loadUthmanicFont(context)
+    }
+
     AndroidView(
-        modifier = modifier.fillMaxWidth().padding(vertical = 6.dp),
         factory = { ctx ->
             TextView(ctx).apply {
-                layoutDirection = View.LAYOUT_DIRECTION_RTL
-                textDirection = View.TEXT_DIRECTION_RTL
                 gravity = Gravity.RIGHT
-                textLocale = Locale.forLanguageTag("ar")
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 29f)
-                setLineSpacing(8f * resources.displayMetrics.density, 1.23f)
+                textDirection = View.TEXT_DIRECTION_RTL
+                layoutDirection = View.LAYOUT_DIRECTION_RTL
                 includeFontPadding = true
-                breakStrategy = Layout.BREAK_STRATEGY_HIGH_QUALITY
-                hyphenationFrequency = Layout.HYPHENATION_FREQUENCY_NONE
-                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 27f)
+                setLineSpacing(8f, 1.1f)
             }
         },
+        modifier = modifier.fillMaxWidth(),
         update = { view ->
-            view.typeface = typeface ?: Typeface.create("serif", Typeface.NORMAL)
-            view.setTextColor(defaultTextColor)
-            view.text = content
+            view.typeface = arabicFont
+            view.setTextColor(foreground)
+            view.text = displayed
         }
     )
 }
