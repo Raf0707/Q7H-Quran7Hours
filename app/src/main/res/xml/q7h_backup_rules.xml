@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <include domain="sharedpref" path="q7h_compose.xml" />
+    <include domain="sharedpref" path="LastPagePrefs.xml" />
+</full-backup-content>

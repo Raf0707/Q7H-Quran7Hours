@@ -1,0 +1,23 @@
+{
+  "translation": {
+    "meta": {
+      "code": "demo.user-authored",
+      "copyrights": {"license": "Example only. Do not distribute as Quran Academy text."}
+    },
+    "content": {
+      "surahs": [
+        {
+          "number": 1,
+          "ayahs": [
+            {"number": 1, "words": [
+              {"number": 1, "text": "во имя"},
+              {"number": 2, "text": "Аллаха"},
+              {"number": 3, "text": "Милостивого"},
+              {"number": 4, "text": "Милосердного"}
+            ]}
+          ]
+        }
+      ]
+    }
+  }
+}
