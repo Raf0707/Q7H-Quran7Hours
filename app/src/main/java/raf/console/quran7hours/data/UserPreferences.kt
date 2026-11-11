@@ -63,4 +63,30 @@ class UserPreferences(context: Context) {
     var ayahEndMode: String
         get() = p.getString("ayahEndMode", "STOP") ?: "STOP"
         set(value) = p.edit().putString("ayahEndMode", value).apply()
+    var inkVisible: Boolean
+        get() = p.getBoolean("learning_ink_visible", true)
+        set(value) = p.edit().putBoolean("learning_ink_visible", value).apply()
+
+    var inkToolbarOffsetDp: Float
+        get() = p.getFloat("learning_ink_toolbar_offset_dp", 0f)
+        set(value) = p.edit().putFloat("learning_ink_toolbar_offset_dp", value).apply()
+
+    var hadrSeekIntervalSeconds: Int
+        get() = p.getInt("hadr_seek_interval_seconds", 10).coerceIn(1, 86400)
+        set(value) = p.edit().putInt("hadr_seek_interval_seconds", value.coerceIn(1, 86400)).apply()
+
+    /** Each audio list entry has its own selected mode, default NEXT. */
+    fun hadrMode(segment: String, number: Int): String =
+        p.getString("hadr_mode_${segment}_${number}", "NEXT") ?: "NEXT"
+
+    fun saveHadrMode(segment: String, number: Int, mode: String) {
+        require(mode in setOf("NEXT", "REPEAT", "STOP"))
+        p.edit().putString("hadr_mode_${segment}_${number}", mode).commit()
+    }
+
+    fun setHadrActiveSegment(segment: String, number: Int) {
+        p.edit().putString("hadr_active_segment", segment)
+            .putInt("hadr_active_number", number).commit()
+    }
+
 }

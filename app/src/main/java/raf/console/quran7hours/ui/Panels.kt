@@ -46,6 +46,12 @@ private fun timeLabel(ms: Long): String {
     else "%02d:%02d".format(seconds / 60, seconds % 60)
 }
 
+private fun seekLabel(seconds: Int): String = when {
+    seconds % 3600 == 0 -> "${seconds / 3600}ч"
+    seconds % 60 == 0 -> "${seconds / 60}м"
+    else -> "${seconds}с"
+}
+
 /** Hadr-only chapter navigation with a single fixed-speed MP3 mini player. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -122,6 +128,30 @@ fun AudioPanel(
                             Text("—", style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                        var endMode by remember(category, number) {
+                            mutableStateOf(prefs.hadrMode(category.name, number))
+                        }
+                        val icon = when (endMode) {
+                            "REPEAT" -> Icons.Default.RepeatOne
+                            "STOP" -> Icons.Default.StopCircle
+                            else -> Icons.Default.PlaylistPlay
+                        }
+                        IconButton(onClick = {
+                            endMode = when (endMode) {
+                                "NEXT" -> "REPEAT"
+                                "REPEAT" -> "STOP"
+                                else -> "NEXT"
+                            }
+                            prefs.saveHadrMode(category.name, number, endMode)
+                            prefs.setHadrActiveSegment(category.name, number)
+                        }, enabled = time != null) {
+                            Icon(icon, when (endMode) {
+                                "REPEAT" -> "Повторять выбранный раздел"
+                                "STOP" -> "Остановиться после раздела"
+                                else -> "Продолжать по порядку"
+                            }, tint = if (time == null) MaterialTheme.colorScheme.onSurfaceVariant
+                                else MaterialTheme.colorScheme.primary)
+                        }
                         if (selected && timedActive == number) Icon(Icons.Default.GraphicEq,
                             "Текущий раздел", modifier = Modifier.size(17.dp),
                             tint = MaterialTheme.colorScheme.primary)
@@ -130,7 +160,7 @@ fun AudioPanel(
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        HadrMiniPlayer(playback, controller, timings, activeSurah, currentPage, onPlay)
+        HadrMiniPlayer(playback, controller, timings, activeSurah, currentPage, onPlay, prefs)
     }
 }
 
@@ -141,8 +171,10 @@ private fun HadrMiniPlayer(
     timings: TimingCatalog,
     activeSurah: Int?,
     currentPage: Int,
-    onPlay: () -> Unit
+    onPlay: () -> Unit,
+    prefs: UserPreferences
 ) {
+    val seekSeconds = prefs.hadrSeekIntervalSeconds
     var dragging by remember(playback.mediaId) { mutableStateOf(false) }
     var proposed by remember(playback.mediaId) { mutableFloatStateOf(0f) }
     val duration = playback.durationMs
@@ -194,16 +226,30 @@ private fun HadrMiniPlayer(
             }
             IconButton(onClick = {
                 if (ready) controller?.seekTo(
-                    raf.console.quran7hours.media.HadrSeekPolicy.step(playback.positionMs, -10_000L, duration))
-            }, enabled = ready) { Icon(Icons.Default.Replay10, "Назад на 10 секунд") }
+                    raf.console.quran7hours.media.HadrSeekPolicy.step(playback.positionMs, -seekSeconds * 1000L, duration))
+            }, enabled = ready) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(if (seekSeconds == 5) Icons.Default.Replay5
+                        else if (seekSeconds == 10) Icons.Default.Replay10
+                        else Icons.Default.FastRewind, "Назад на $seekSeconds секунд")
+                    if (seekSeconds !in setOf(5, 10)) Text(seekLabel(seekSeconds), fontSize = 9.sp)
+                }
+            }
             FilledIconButton(onClick = onPlay, enabled = controller != null) {
                 Icon(if (playback.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
                     if (playback.playing) "Пауза" else "Воспроизвести")
             }
             IconButton(onClick = {
                 if (ready) controller?.seekTo(
-                    raf.console.quran7hours.media.HadrSeekPolicy.step(playback.positionMs, 10_000L, duration))
-            }, enabled = ready) { Icon(Icons.Default.Forward10, "Вперёд на 10 секунд") }
+                    raf.console.quran7hours.media.HadrSeekPolicy.step(playback.positionMs, seekSeconds * 1000L, duration))
+            }, enabled = ready) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(if (seekSeconds == 5) Icons.Default.Forward5
+                        else if (seekSeconds == 10) Icons.Default.Forward10
+                        else Icons.Default.FastForward, "Вперёд на $seekSeconds секунд")
+                    if (seekSeconds !in setOf(5, 10)) Text(seekLabel(seekSeconds), fontSize = 9.sp)
+                }
+            }
             IconButton(onClick = { if (ready) controller?.seekTo(
                 raf.console.quran7hours.media.HadrSeekPolicy.clampMs(duration, duration))
             }, enabled = ready) { Icon(Icons.Default.LastPage, "К концу записи") }
@@ -290,7 +336,7 @@ fun TafsirPanel(
             }
             if (loadedVerses.isEmpty()) {
                 item(key = "empty-tafsir") {
-                    Text("Для страницы $page не найден JSON тафсира",
+                    Text("Тафсир страницы $page недоступен",
                         modifier = Modifier.padding(20.dp))
                 }
             }
@@ -385,8 +431,7 @@ private fun AyahWordDictionary(surah: Int, ayah: Int, words: List<WordByWordStor
                 ) {
                     if (words.isEmpty()) {
                         Text(
-                            "Для этого аята нет проверенного соответствия в assets/word_by_word. " +
-                                "Проверьте JSON страницы и нумерацию аятов (особенно Аль-Фатиху).",
+                            "Пословный перевод пока недоступен для этого аята.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -564,14 +609,44 @@ fun SettingsPanel(
         SettingsSwitch("Автоматическое перелистывание по проверенным таймингам", autoFlip, setAutoFlip)
         SettingsSwitch("Не выключать экран", keepAwake, setKeepAwake)
         HorizontalDivider()
-        Text("Мусхаф", style = MaterialTheme.typography.titleMedium)
-        Text("Мусхаф, тафсир, словарь и MP3 находятся в локальных assets. " +
-            "Интернет требуется только для онлайн-аудио чтецов.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-        MushafStore.Variant.entries.forEach { variant ->
-            Text("${variant.title}: ${mushaf.folderName(variant)}",
-                style = MaterialTheme.typography.bodySmall)
+        Text("Шаг перемотки аудио", style = MaterialTheme.typography.titleMedium)
+        var intervalSeconds by remember { mutableIntStateOf(prefs.hadrSeekIntervalSeconds) }
+        var customSeconds by remember { mutableStateOf(intervalSeconds.toString()) }
+        var intervalUnit by remember { mutableStateOf("с") }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(5 to "5 секунд", 10 to "10 секунд").forEach { (seconds, label) ->
+                FilterChip(selected = intervalSeconds == seconds, onClick = {
+                    intervalSeconds = seconds
+                    prefs.hadrSeekIntervalSeconds = seconds
+                }, label = { Text(label) })
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(value = customSeconds,
+                onValueChange = { customSeconds = it.filter(Char::isDigit).take(5) },
+                label = { Text("Свой шаг") }, singleLine = true,
+                modifier = Modifier.weight(1f),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
+            var unitMenu by remember { mutableStateOf(false) }
+            Box {
+                TextButton(onClick = { unitMenu = true }) { Text(when (intervalUnit) {
+                    "ч" -> "Часы"; "м" -> "Минуты"; else -> "Секунды"
+                }) }
+                DropdownMenu(expanded = unitMenu, onDismissRequest = { unitMenu = false }) {
+                    listOf("с" to "Секунды", "м" to "Минуты", "ч" to "Часы").forEach { (u, name) ->
+                        DropdownMenuItem(text = { Text(name) }, onClick = {
+                            intervalUnit = u; unitMenu = false
+                        })
+                    }
+                }
+            }
+            val factor = when (intervalUnit) { "ч" -> 3600; "м" -> 60; else -> 1 }
+            val newSeconds = (customSeconds.toLongOrNull() ?: 0L) * factor
+            TextButton(onClick = {
+                intervalSeconds = newSeconds.toInt()
+                prefs.hadrSeekIntervalSeconds = intervalSeconds
+            }, enabled = newSeconds in 1L..86400L) { Text("OK") }
         }
         Spacer(Modifier.height(20.dp))
     }

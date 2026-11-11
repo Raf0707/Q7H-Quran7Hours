@@ -3,9 +3,19 @@
     <cloud-backup>
         <include domain="sharedpref" path="q7h_compose.xml" />
         <include domain="sharedpref" path="LastPagePrefs.xml" />
+        <include domain="database" path="q7h_learning.db" />
+        <include domain="database" path="q7h_learning.db-wal" />
+        <include domain="database" path="q7h_learning_room.db" />
+        <include domain="database" path="q7h_learning_room.db-wal" />
+        <include domain="database" path="q7h_learning_room.db-shm" />
     </cloud-backup>
     <device-transfer>
         <include domain="sharedpref" path="q7h_compose.xml" />
         <include domain="sharedpref" path="LastPagePrefs.xml" />
+        <include domain="database" path="q7h_learning.db" />
+        <include domain="database" path="q7h_learning.db-wal" />
+        <include domain="database" path="q7h_learning_room.db" />
+        <include domain="database" path="q7h_learning_room.db-wal" />
+        <include domain="database" path="q7h_learning_room.db-shm" />
     </device-transfer>
 </data-extraction-rules>

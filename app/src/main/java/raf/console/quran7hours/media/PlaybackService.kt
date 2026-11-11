@@ -20,6 +20,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import raf.console.quran7hours.data.QuranCatalog
+import raf.console.quran7hours.data.TimingCatalog
 
 /**
  * Two independent ExoPlayer engines, two sessions, one mutually exclusive audio output.
@@ -41,6 +42,40 @@ class PlaybackService : MediaSessionService() {
     private var restoreTargetMs = 0L
     private var lastSavedMs = -1L
     private var lastSavedRealtime = 0L
+    private val hadrTimings by lazy { TimingCatalog(this) }
+    private var lastBoundaryHandled: String? = null
+
+    /** Repeat/stop exact TIMED SEGMENT, never the whole MP3. Evaluated by the service in background. */
+    private fun applyHadrSegmentMode() {
+        if (!::hadr.isInitialized || !hadr.isPlaying || restoreWaitingForReady) return
+        val category = hadrPrefs.getString("hadr_active_segment", null) ?: return
+        val segment = runCatching { QuranCatalog.Segment.valueOf(category) }.getOrNull() ?: return
+        val marks = hadrTimings.marks(segment)
+        val pos = hadr.currentPosition
+        val currentIndex = marks.indexOfLast { it.positionMs != null && it.positionMs!! <= pos }
+        // Important: right AFTER crossing the boundary the timeline already belongs to the NEXT item.
+        // Check both items, or the previous item’s STOP/REPEAT is missed on slow devices.
+        for (index in listOf(currentIndex - 1, currentIndex)) {
+            if (index !in marks.indices) continue
+            val item = marks[index]
+            val start = item.positionMs ?: continue
+            val end = marks.getOrNull(index + 1)?.positionMs
+                ?: hadr.duration.takeIf { it > 0L && it != C.TIME_UNSET } ?: continue
+            if (end <= start) continue
+            val mode = hadrPrefs.getString("hadr_mode_${segment.name}_${item.number}", "NEXT") ?: "NEXT"
+            if (mode == "NEXT") continue
+            val marker = "${segment.name}:${item.number}:$mode"
+            if (pos < end - 500L && lastBoundaryHandled == marker) lastBoundaryHandled = null
+            if (pos < end - 150L || pos > end + 1000L || lastBoundaryHandled == marker) continue
+            lastBoundaryHandled = marker
+            when (mode) {
+                "REPEAT" -> hadr.seekTo(start)
+                "STOP" -> { hadr.pause(); hadr.seekTo(end) }
+            }
+            saveHadrPosition(force = true)
+            break
+        }
+    }
 
     /** Synchronous, tiny checkpoint. Do not overwrite restored progress before source is ready. */
     private fun saveHadrPosition(force: Boolean = false) {
@@ -161,8 +196,12 @@ class PlaybackService : MediaSessionService() {
         // continues from this foreground service.
         persistenceScope.launch {
             while (isActive) {
-                delay(1_000L)
-                if (hadr.isPlaying) saveHadrPosition()
+                delay(150L)
+                if (hadr.isPlaying) {
+                    applyHadrSegmentMode()
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (now - lastSavedRealtime >= 1_000L) saveHadrPosition()
+                }
             }
         }
     }

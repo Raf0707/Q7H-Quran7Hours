@@ -2,4 +2,9 @@
 <full-backup-content>
     <include domain="sharedpref" path="q7h_compose.xml" />
     <include domain="sharedpref" path="LastPagePrefs.xml" />
+    <include domain="database" path="q7h_learning.db" />
+    <include domain="database" path="q7h_learning.db-wal" />
+    <include domain="database" path="q7h_learning_room.db" />
+    <include domain="database" path="q7h_learning_room.db-wal" />
+    <include domain="database" path="q7h_learning_room.db-shm" />
 </full-backup-content>
