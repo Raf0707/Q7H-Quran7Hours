@@ -8,7 +8,7 @@ p = argparse.ArgumentParser()
 p.add_argument('--project', type=Path, default=Path.cwd())
 a = p.parse_args()
 root = a.project.resolve()
-b = root / 'Q7H_BACKUP_BEFORE_TAFSIR_SETTINGS_2026_11_12'
+b = root / 'Q7H_BACKUP_BEFORE_TAFSIR_SETTINGS_STEP2_2026_11_12'
 if not b.is_dir():
     raise SystemExit('Backup not found; nothing to restore.')
 for old in b.rglob('*.kt'):

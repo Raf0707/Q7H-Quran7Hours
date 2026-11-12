@@ -104,7 +104,18 @@ internal class OriginalQpcTafsirRepository(context: Context) {
 
         val index = getVersePageIndex()
         val result = LinkedHashMap<Pair<Int, Int>, OriginalQpcAyah>()
+        // Azan.ru uses the Hanafi division of al-Fatiha: basmala is separate,
+        // while QPC 1441H counts basmala as 1:1 and combines the last two phrases.
+        // Never assign a QPC glyph by an incompatible numerical verse key.
+        val hanafiFatiha = if (verses.any { it.surah == 1 && it.ayah in 1..7 })
+            hanafiFatihahGlyphs(verses) else emptyMap()
         for (verse in verses) {
+            if (verse.surah == 1 && verse.ayah in 1..7) {
+                val hanafi = hanafiFatiha[verse.surah to verse.ayah]
+                if (hanafi != null) result[verse.surah to verse.ayah] = hanafi
+                else Log.w(LOG_TAG, "Fatiha ${verse.ayah}: verified QPC word match unavailable; keeping Azan Arabic")
+                continue
+            }
             val id = verseId(verse.surah, verse.ayah)
             val key = verse.surah to verse.ayah
             val pages = index[id]
@@ -145,6 +156,52 @@ internal class OriginalQpcTafsirRepository(context: Context) {
             if (parts.isNotEmpty()) result[key] = OriginalQpcAyah(parts)
         }
         result
+    }
+
+    /**
+     * Hanafi Fatihah (Azan.ru) and standard 1441H page-one verse boundaries differ.
+     * Match consecutive, complete, ordered QPC WORDS to the actual Azan Arabic,
+     * splitting QPC 1:7 only at a verified word boundary. No hand-made glyphs.
+     */
+    private fun hanafiFatihahGlyphs(
+        verses: List<raf.console.quran7hours.data.TafsirStore.Verse>
+    ): Map<Pair<Int, Int>, OriginalQpcAyah> {
+        val source = wordsForPage(1)
+            .filter { it.surah == 1 && it.ayah in 2..7 && it.glyphs.isNotBlank() }
+            .sortedWith(compareBy<OriginalQpcWord> { it.ayah }.thenBy { it.wordNumber })
+        val target = verses.filter { it.surah == 1 && it.ayah in 1..7 && it.arabic.isNotBlank() }
+            .sortedBy { it.ayah }
+        if (source.isEmpty() || target.isEmpty()) return emptyMap()
+
+        val matched = LinkedHashMap<Pair<Int, Int>, OriginalQpcAyah>()
+        var cursor = 0
+        target.forEachIndexed { position, verse ->
+            val leftAfter = target.size - position - 1
+            val lastPossible = source.size - leftAfter
+            if (cursor >= lastPossible) return matched // incomplete: fail closed
+            var selectedEnd: Int? = null
+            var bestDistance = Int.MAX_VALUE
+            for (end in (cursor + 1)..lastPossible) {
+                val candidate = source.subList(cursor, end).joinToString(" ") { it.word }
+                if (!likelySameVerse(verse.arabic, candidate)) continue
+                val distance = levenshteinForSmallVerse(qpcSkeleton(verse.arabic), qpcSkeleton(candidate))
+                if (distance < bestDistance) {
+                    bestDistance = distance
+                    selectedEnd = end
+                }
+            }
+            val end = selectedEnd ?: return matched
+            // Every glyph is taken from the same verified, contiguous QPC page.
+            val glyphs = source.subList(cursor, end).joinToString(" ") { it.glyphs }
+            matched[1 to verse.ayah] = OriginalQpcAyah(listOf(OriginalQpcPart(1, glyphs)))
+            cursor = end
+        }
+        // Reject a partition that silently dropped or duplicated any Fatihah words.
+        if (target.size == 7 && cursor != source.size) {
+            Log.w(LOG_TAG, "Fatiha: unmatched QPC words remain ($cursor/${source.size})")
+            return emptyMap()
+        }
+        return matched
     }
 
     private suspend fun getVersePageIndex(): Map<Long, List<Int>> {
@@ -229,6 +286,9 @@ private fun qpcSkeleton(input: String): String = buildString(input.length) {
         appendCodePoint(normalized)
     }
 }
+
+private fun levenshteinForSmallVerse(a: String, b: String): Int =
+    boundedDistance(a, b, max(a.length, b.length))
 
 private fun likelySameVerse(azanText: String, qpcText: String): Boolean {
     val azan = qpcSkeleton(azanText)

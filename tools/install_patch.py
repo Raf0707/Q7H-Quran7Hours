@@ -57,6 +57,28 @@ def patch_panels(s: str) -> str:
     val originalQpc = remember(context) { OriginalQpcTafsirRepository(context) }
 '''
     s = replace_block(s, start, stop, replacement, 'Tafsir atomic load')
+    # The audio list is always opened at the current reading position, for all 5 tabs.
+    # Previously it restored an unrelated saved viewport; the user could land far away.
+    audio_start = '''    val viewportKey = remember(category) { "audio_${category.name.lowercase()}" }
+    val listState = remember(category) {
+        val (index, offset) = prefs.panelViewport(viewportKey)
+        LazyListState(index.coerceIn(0, (marks.size - 1).coerceAtLeast(0)), offset)
+    }
+    PersistLazyViewport(listState, prefs, viewportKey)
+    val timedActive = if (playback.mediaId == "hadr") timings.at(category, playback.positionMs) else null
+    val active = timedActive ?: QuranCatalog.segmentForPage(category, currentPage)
+'''
+    audio_end = '''    val readingPosition = QuranCatalog.segmentForPage(category, currentPage)
+    val listState = remember(category) {
+        LazyListState((readingPosition - 1).coerceIn(0, (marks.size - 1).coerceAtLeast(0)), 0)
+    }
+    LaunchedEffect(category, currentPage) {
+        if (readingPosition in 1..marks.size) listState.scrollToItem(readingPosition - 1)
+    }
+    val timedActive = if (playback.mediaId == "hadr") timings.at(category, playback.positionMs) else null
+    val active = timedActive ?: readingPosition
+'''
+    s = replace_once(s, audio_start, audio_end, 'audio auto-scroll: current surah/page/juz/hizb/manzil')
     # Add a settings gear next to the Tafsir page title.
     title = '''            Text("Тафсир · страница $page", style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
@@ -138,6 +160,21 @@ def patch_panels(s: str) -> str:
         'Text(word.arabic, fontSize = fontSizeSp.sp,', 'dictionary Arabic size')
     s = replace_once(s, 'style = MaterialTheme.typography.bodyMedium)\n                            }\n                        }',
         'style = MaterialTheme.typography.bodyMedium.copy(fontSize = (fontSizeSp * 0.78f).coerceAtLeast(11f).sp))\n                            }\n                        }', 'dictionary translation size')
+    # Save scroll position when the same Tafsir page is reopened, but on ANY page
+    # transition start at top, even if that page was read and scrolled earlier.
+    s = replace_once(s, '''        val viewportKey = "tafsir_$page"
+        val listState = remember(page) {
+            val (index, offset) = prefs.panelViewport(viewportKey)
+            LazyListState(index.coerceIn(0, (loadedVerses.size - 1 + if (page == 1) 1 else 0).coerceAtLeast(0)), offset)
+        }
+        PersistLazyViewport(listState, prefs, viewportKey)''', '''        val viewportKey = "tafsir_$page"
+        val listState = remember(page) {
+            val (index, offset) = if (prefs.lastTafsirViewedPage == page)
+                prefs.panelViewport(viewportKey) else (0 to 0)
+            LazyListState(index.coerceIn(0, (loadedVerses.size - 1 + if (page == 1) 1 else 0).coerceAtLeast(0)), offset)
+        }
+        LaunchedEffect(page) { prefs.lastTafsirViewedPage = page }
+        PersistLazyViewport(listState, prefs, viewportKey)''', 'Tafsir open-same-page restore / page-turn reset')
     # Add exact same settings section under Settings → Tajweed.
     s = replace_once(s, '''    val scroll = rememberScrollState(initial = prefs.panelViewport("settings").second)
     PersistSettingsViewport(scroll, prefs)''',
@@ -149,6 +186,18 @@ def patch_panels(s: str) -> str:
         HorizontalDivider()
         TafsirDisplaySettingsSection(displayPrefs)''', 'settings section')
     return s
+
+
+def patch_preferences(s: str) -> str:
+    if 'lastTafsirViewedPage' in s:
+        raise ValueError('UserPreferences already has step 2 patch')
+    marker = '    /** Exact lazy-list viewport: item index + pixel offset, stored per section. */'
+    block = '''    /** Last Tafsir page actually visited: distinguishes reopening from page turning. */
+    var lastTafsirViewedPage: Int
+        get() = p.getInt("tafsir_last_viewed_page", 0).coerceIn(0, 604)
+        set(value) = p.edit().putInt("tafsir_last_viewed_page", value.coerceIn(0, 604)).apply()
+'''
+    return replace_once(s, marker, block + marker, 'last viewed Tafsir page preference')
 
 
 def patch_main(s: str) -> str:
@@ -239,6 +288,10 @@ def apply(project: Path, allow_partial: bool = False) -> None:
     edits: dict[Path, str] = {}
     panels = target / 'Panels.kt'
     main = target / 'MainActivity.kt'
+    preferences = project / 'app/src/main/java/raf/console/quran7hours/data/UserPreferences.kt'
+    if not preferences.is_file():
+        raise ValueError('Missing real UserPreferences.kt; refusing to change application sources')
+    edits[preferences] = patch_preferences(preferences.read_text('utf-8'))
     edits[panels] = patch_panels(panels.read_text('utf-8'))
     edits[main] = patch_main(main.read_text('utf-8'))
     hafiz_sources = find_hafiz_source(target)
@@ -247,9 +300,11 @@ def apply(project: Path, allow_partial: bool = False) -> None:
     try:
         edits[hafiz_sources[0]] = patch_hafiz(hafiz_sources[0].read_text('utf-8'))
     except Exception as exc:
-        if not allow_partial:
-            raise
-        print('WARNING: Diary not patched:', exc)
+        # Do NOT block the fixes to Arabic Fatiha, Tafsir, Audio and Settings.
+        # An ink-annotated diary must be modified manually without destroying
+        # user's pen strokes. Never replace it with a fake plain-text Text().
+        print('WARNING: Diary has a custom ink renderer; it was preserved:', exc)
+        print('The other 4 fixes WILL be installed. See DIARY_INTEGRATION_NOTE.txt.')
     originals = {p: p.read_bytes() for p in edits}
     current_renderer = target / 'OriginalQpcTafsir.kt'
     expected = SRC / 'OriginalQpcTafsir.kt'
@@ -264,7 +319,7 @@ def apply(project: Path, allow_partial: bool = False) -> None:
         if dest.is_file() and dest != current_renderer:
             raise ValueError(f'Target already exists: {dest}. Do not overwrite.')
     # Only reach writes if all anchors and files were checked successfully.
-    backup = project / 'Q7H_BACKUP_BEFORE_TAFSIR_SETTINGS_2026_11_12'
+    backup = project / 'Q7H_BACKUP_BEFORE_TAFSIR_SETTINGS_STEP2_2026_11_12'
     if backup.exists():
         raise ValueError(f'Backup already exists: {backup}. Aborting.')
     for original in list(edits) + [current_renderer]:
@@ -279,6 +334,12 @@ def apply(project: Path, allow_partial: bool = False) -> None:
     print('SUCCESS. Modified:')
     for p in [*edits, *to_install]:
         print(' -', p.relative_to(project))
+    if hafiz_sources[0] not in edits:
+        (project / 'Q7H_DIARY_INTEGRATION_NOTE.txt').write_text(
+            'HafizDiaryPanel uses a custom Arabic/ink renderer. Its original code has not been changed.\n'
+            'To preserve all existing ink markings, integrate QPC in that renderer rather than replacing annotated Text with a plain Text.\n'
+            'The Tafsir, Fatiha, preload, settings and scroll changes were installed.\n'
+            'To prepare a safe full diary patch, run EXPORT_HAFIZ_SOURCE.bat and share its output.\n', 'utf-8')
     print('Backup:', backup)
 
 

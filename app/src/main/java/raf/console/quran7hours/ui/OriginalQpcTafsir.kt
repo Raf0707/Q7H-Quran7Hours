@@ -103,25 +103,45 @@ internal class OriginalQpcTafsirRepository(context: Context) {
         val index = getVersePageIndex()
         val result = LinkedHashMap<Pair<Int, Int>, OriginalQpcAyah>()
         for (verse in verses) {
-            val id = verseId(verse.surah, verse.ayah)
+            // Q7H_FATIHA_SPLIT_6_7_20261112
+            // Hanafi Al-Fatiha excludes Basmala from the seven numbered ayahs.
+            // QPC canonical ayahs: Hanafi 1..5 -> QPC 2..6; Hanafi 6 and 7 -> QPC 7.
             val key = verse.surah to verse.ayah
-            val pages = index[id]
+            val qpcAyah = when {
+                verse.surah == 1 && verse.ayah in 1..5 -> verse.ayah + 1
+                verse.surah == 1 && verse.ayah in 6..7 -> 7
+                else -> verse.ayah
+            }
+            val pages = index[verseId(verse.surah, qpcAyah)]
             if (pages.isNullOrEmpty()) {
-                Log.w(LOG_TAG, "No QPC layout for ${verse.surah}:${verse.ayah}")
+                Log.w(LOG_TAG, "No QPC layout for ${verse.surah}:${verse.ayah} (QPC $qpcAyah)")
                 continue
             }
-            // Canonical QPC coordinates are identified by surah:ayah:wordNumber,
-            // NOT by textual similarity or by the current Tafsir page number.
-            val words = ArrayList<OriginalQpcWord>()
+            val canonicalWords = ArrayList<OriginalQpcWord>()
             for (p in pages) {
-                words.addAll(wordsForPage(p).filter { it.surah == verse.surah && it.ayah == verse.ayah })
+                canonicalWords.addAll(wordsForPage(p).filter {
+                    it.surah == verse.surah && it.ayah == qpcAyah
+                })
             }
-            words.sortWith(compareBy<OriginalQpcWord> { it.wordNumber }.thenBy { it.page })
-            if (words.isEmpty() || words[0].wordNumber != 1 ||
-                words.indices.any { words[it].wordNumber != it + 1 }) {
-                Log.w(LOG_TAG, "QPC word sequence is incomplete/duplicated for ${verse.surah}:${verse.ayah}")
+            canonicalWords.sortWith(compareBy<OriginalQpcWord> { it.wordNumber }.thenBy { it.page })
+            if (canonicalWords.isEmpty() || canonicalWords[0].wordNumber != 1 ||
+                canonicalWords.indices.any { canonicalWords[it].wordNumber != it + 1 }) {
+                Log.w(LOG_TAG, "Incomplete QPC words for ${verse.surah}:$qpcAyah")
                 continue
             }
+            val words: List<OriginalQpcWord> = if (verse.surah == 1 && verse.ayah in 6..7) {
+                // Surah 1, QPC ayah 7 has precisely nine words:
+                // Hanafi 1:6 = first four, Hanafi 1:7 = remaining five.
+                // Use word numbers, not a fuzzy text-based split.
+                if (canonicalWords.size != 9 ||
+                    !qpcSkeleton(canonicalWords[0].word).startsWith("صر") ||
+                    !qpcSkeleton(canonicalWords[4].word).startsWith("غير")) {
+                    Log.w(LOG_TAG, "Unexpected QPC Fatiha 1:7 word sequence; safe fallback")
+                    continue
+                }
+                if (verse.ayah == 6) canonicalWords.subList(0, 4)
+                else canonicalWords.subList(4, 9)
+            } else canonicalWords
             val qpcArabic = words.joinToString(" ") { it.word }
             if (!likelySameVerse(verse.arabic, qpcArabic)) {
                 Log.w(LOG_TAG, "Different Quran text for ${verse.surah}:${verse.ayah}; safe fallback")
