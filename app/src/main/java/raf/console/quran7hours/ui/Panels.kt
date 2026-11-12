@@ -1,5 +1,8 @@
 package raf.console.quran7hours.ui
+
+
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -8,6 +11,21 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -133,26 +151,35 @@ fun AudioPanel(
                         var endMode by remember(category, number) {
                             mutableStateOf(prefs.hadrMode(category.name, number))
                         }
-                        val icon = when (endMode) {
-                            "REPEAT" -> Icons.Default.RepeatOne
-                            "STOP" -> Icons.Default.StopCircle
-                            else -> Icons.Default.PlaylistPlay
-                        }
+                        // NEXT -> unlimited repeat -> N repeats -> STOP.
+                        val canRepeatThisMark = time != null &&
+                            (marks.getOrNull(number)?.positionMs != null || number == marks.lastOrNull()?.number)
                         IconButton(onClick = {
                             endMode = when (endMode) {
                                 "NEXT" -> "REPEAT"
-                                "REPEAT" -> "STOP"
+                                "REPEAT" -> "REPEAT_N"
+                                "REPEAT_N" -> "STOP"
                                 else -> "NEXT"
                             }
                             prefs.saveHadrMode(category.name, number, endMode)
                             prefs.setHadrActiveSegment(category.name, number)
-                        }, enabled = time != null) {
-                            Icon(icon, when (endMode) {
-                                "REPEAT" -> "Повторять выбранный раздел"
-                                "STOP" -> "Остановиться после раздела"
-                                else -> "Продолжать по порядку"
-                            }, tint = if (time == null) MaterialTheme.colorScheme.onSurfaceVariant
-                                else MaterialTheme.colorScheme.primary)
+                        }, enabled = canRepeatThisMark) {
+                            val tint = if (!canRepeatThisMark) MaterialTheme.colorScheme.onSurfaceVariant
+                                else MaterialTheme.colorScheme.primary
+                            if (endMode == "REPEAT_N") {
+                                Text("N", fontWeight = FontWeight.Black, color = tint,
+                                    fontSize = 19.sp)
+                            } else {
+                                Icon(when (endMode) {
+                                    "REPEAT" -> Icons.Default.RepeatOne
+                                    "STOP" -> Icons.Default.StopCircle
+                                    else -> Icons.Default.PlaylistPlay
+                                }, when (endMode) {
+                                    "REPEAT" -> "Повторять выбранный раздел без ограничений"
+                                    "STOP" -> "Остановиться после раздела"
+                                    else -> "Продолжать по порядку"
+                                }, tint = tint)
+                            }
                         }
                         if (selected && timedActive == number) Icon(Icons.Default.GraphicEq,
                             "Текущий раздел", modifier = Modifier.size(17.dp),
@@ -282,9 +309,11 @@ fun TafsirPanel(
     onPrevious: () -> Unit,
     onNext: () -> Unit
 ) {
-    val verses by produceState<List<TafsirStore.Verse>?>(null, page) {
-        value = store.page(page)
+    val readingPage by produceState<TafsirStore.ReadingPage?>(null, page) {
+        value = store.readingPage(page)
     }
+    val verses = readingPage?.verses
+    val introductions = readingPage?.introductions.orEmpty()
     // No expensive per-word parsing on the main/UI thread. The reader caches per-surah JSON.
     val dictionaries by produceState<Map<Pair<Int, Int>, List<WordByWordStore.Word>>>(
         emptyMap(), page, verses
@@ -312,6 +341,13 @@ fun TafsirPanel(
         fontSize = (display.tafsirSp + 2f).sp,
         lineHeight = ((display.tafsirSp + 2f) * 1.45f).sp
     )
+    // The audio service can continue the 43-reciter sequence after this sheet closes.
+    // Store the verified current list once; never query GitHub on each transition.
+    LaunchedEffect(reciters) {
+        if (reciters.isNotEmpty()) {
+            prefs.saveReciterOrder(reciters.map { it.repository to it.branch })
+        }
+    }
     val originalQpc = remember(context) { OriginalQpcTafsirRepository(context) }
     val qpcVerses by produceState<Map<Pair<Int, Int>, OriginalQpcAyah>>(
         emptyMap(), page, verses
@@ -319,18 +355,6 @@ fun TafsirPanel(
         value = verses?.let { originalQpc.forPage(page, it) }.orEmpty()
     }
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
-        // Quran navigation: next page is to the LEFT, previous page to the RIGHT.
-        // Keep buttons apart so they cannot be accidentally pressed together.
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onNext, enabled = page < 604) {
-                Icon(Icons.Default.ChevronLeft, "Следующая страница")
-            }
-            Text("Тафсир · страница $page", style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
-            IconButton(onClick = onPrevious, enabled = page > 1) {
-                Icon(Icons.Default.ChevronRight, "Предыдущая страница")
-            }
-        }
         if (tajweed && !originalQpc.isPackComplete()) {
             Text(
                 "Оригинальный QPC V4 не установлен. Для цветного таджвида запусти INSTALL_FROM_OLD.bat.",
@@ -341,7 +365,7 @@ fun TafsirPanel(
         }
         val loadedVerses = verses
         if (loadedVerses == null) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
         } else {
@@ -357,7 +381,7 @@ fun TafsirPanel(
         val pageChanged = previousViewedPage in 1..604 && previousViewedPage != page
         val listState = remember(page) {
             val (index, offset) = if (pageChanged) 0 to 0 else prefs.panelViewport(viewportKey)
-            LazyListState(index.coerceIn(0, (loadedVerses.size - 1 + if (page == 1) 1 else 0).coerceAtLeast(0)), offset)
+            LazyListState(index.coerceIn(0, (loadedVerses.size + introductions.size + if (page == 1) 1 else 0).coerceAtLeast(0)), offset)
         }
         LaunchedEffect(page) {
             if (pageChanged) prefs.savePanelViewport(viewportKey, 0, 0)
@@ -366,9 +390,10 @@ fun TafsirPanel(
         PersistLazyViewport(listState, prefs, viewportKey)
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize(),
+            // Keep reading independently scrollable above the permanent page controls.
+            modifier = Modifier.weight(1f).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(bottom = 24.dp)
+            contentPadding = PaddingValues(top = 14.dp, bottom = 24.dp)
         ) {
             if (page == 1) {
                 item(key = "istiaza-basmala") {
@@ -386,7 +411,21 @@ fun TafsirPanel(
                         modifier = Modifier.padding(20.dp))
                 }
             }
-            items(loadedVerses, key = { "${it.surah}:${it.ayah}" }) { verse ->
+            loadedVerses.forEachIndexed { position, verse ->
+                // Show the original zero-ayah record exactly when the new surah starts.
+                // Never treat it as a numbered ayah or offer audio/dictionary for ayah 0.
+                if (position == 0 || loadedVerses[position - 1].surah != verse.surah) {
+                    introductions.firstOrNull { it.surah == verse.surah }?.let { intro ->
+                        if (display.showTranslation || display.showTafsir) {
+                            item(key = "surah_intro_${intro.surah}") {
+                                Q7HSurahIntroductionCard(intro, store, display)
+                            }
+                        }
+                    }
+                }
+                item(key = "${verse.surah}:${verse.ayah}") {
+                // Separate link coordinates and return address for EACH ayah.
+                val q7hFootnotes = remember(page, verse.surah, verse.ayah) { Q7HFootnoteNavigator() }
                 ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp)) {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -400,6 +439,7 @@ fun TafsirPanel(
                                 playback = playback, controller = controller,
                                 reciters = reciters, reciterError = reciterError,
                                 selectedReciter = selectedReciter, onReciter = onReciter,
+                                prefs = prefs,
                                 endMode = endMode, onEndMode = onEndMode,
                                 onPlay = { onPlayVerse(verse.surah, verse.ayah) }
                             )
@@ -433,42 +473,138 @@ fun TafsirPanel(
                         }
                         if (display.showTranslation && verse.translation.isNotBlank()) {
                             HorizontalDivider()
-                            Text(
-                                verse.translation,
-                                fontSize = display.translationSp.sp,
-                                lineHeight = (display.translationSp * 1.5f).sp
+                            Q7HFootnoteText(
+                                text = verse.translation,
+                                navigator = q7hFootnotes,
+                                paragraphId = "translation",
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontSize = display.translationSp.sp,
+                                    lineHeight = (display.translationSp * 1.5f).sp
+                                )
                             )
                         }
                         // Tafsir is only permitted together with the translation.
                         // Memorize formatted paragraphs across Media3 progress updates.
                         if (display.showTafsir && display.showTranslation) {
                             val formatted = remember(verse.explanation) { store.format(verse.explanation) }
-                            formatted.forEach { paragraph ->
+                            formatted.forEachIndexed { paragraphIndex, paragraph ->
                                 when (paragraph.type) {
                                 TafsirStore.Paragraph.Type.QUOTE -> Surface(
                                     color = MaterialTheme.colorScheme.primaryContainer,
                                     shape = RoundedCornerShape(12.dp)) {
-                                    Text(paragraph.text, modifier = Modifier.fillMaxWidth().padding(13.dp),
-                                        style = tafsirBodyStyle)
+                                    Q7HFootnoteText(paragraph.text, q7hFootnotes, "tafsir-$paragraphIndex",
+                                        modifier = Modifier.fillMaxWidth().padding(13.dp), style = tafsirBodyStyle)
                                 }
-                                TafsirStore.Paragraph.Type.HEADER -> Text(paragraph.text,
-                                    style = tafsirHeadingStyle,
-                                    color = MaterialTheme.colorScheme.primary)
-                                TafsirStore.Paragraph.Type.BULLET -> Text(paragraph.text,
-                                    modifier = Modifier.padding(start = 14.dp),
-                                    style = tafsirBodyStyle)
-                                TafsirStore.Paragraph.Type.BODY -> Text(paragraph.text,
+                                TafsirStore.Paragraph.Type.HEADER -> Q7HFootnoteText(
+                                    paragraph.text, q7hFootnotes, "tafsir-$paragraphIndex",
+                                    style = tafsirHeadingStyle, color = MaterialTheme.colorScheme.primary)
+                                TafsirStore.Paragraph.Type.BULLET -> Q7HFootnoteText(
+                                    paragraph.text, q7hFootnotes, "tafsir-$paragraphIndex",
+                                    modifier = Modifier.padding(start = 14.dp), style = tafsirBodyStyle)
+                                TafsirStore.Paragraph.Type.BODY -> Q7HFootnoteText(
+                                    paragraph.text, q7hFootnotes, "tafsir-$paragraphIndex",
                                     style = tafsirBodyStyle)
                                 }
                             }
                         } // only show tafsir when its accompanying translation is enabled
                     }
                 }
+                } // item(ayah)
+            } // forEachIndexed
+        }
+    }
+        // Fixed navigation bar: always accessible, even when the tafsir is very long.
+        // Right-to-left Mushaf navigation: left = next page; right = previous page.
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(vertical = 2.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onNext, enabled = page < 604) {
+                Icon(Icons.Default.ChevronLeft, contentDescription = "Следующая страница")
+            }
+            Text(
+                text = page.toString(),
+                modifier = Modifier.widthIn(min = 72.dp),
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.titleLarge
+            )
+            IconButton(onClick = onPrevious, enabled = page > 1) {
+                Icon(Icons.Default.ChevronRight, contentDescription = "Предыдущая страница")
             }
         }
     }
-        }
 }
+/** A zero-ayah (surah introduction) from the *same* Azan.ru page JSON.
+ *  It has no play button, ayah number, QPC renderer or dictionary.
+ */
+@Composable
+private fun Q7HSurahIntroductionCard(
+    intro: TafsirStore.SurahIntroduction,
+    store: TafsirStore,
+    display: TafsirDisplayOptions
+) {
+    // Ayah 0 has its OWN link space, independent of all numbered verses.
+    val q7hFootnotes = remember(intro.surah) { Q7HFootnoteNavigator() }
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // The JSON's "ar" is a Russian surah name, not Quran Arabic.
+            if (intro.heading.isNotBlank()) Q7HFootnoteText(
+                intro.heading, q7hFootnotes, "intro-heading",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+            if (intro.translation.isNotBlank()) Q7HFootnoteText(
+                intro.translation, q7hFootnotes, "intro-translation",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (display.showTafsir && display.showTranslation && intro.explanation.isNotBlank()) {
+                HorizontalDivider()
+                val paragraphs = remember(intro.explanation) { store.format(intro.explanation) }
+                val bodyStyle = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = display.tafsirSp.sp,
+                    lineHeight = (display.tafsirSp * 1.5f).sp
+                )
+                val headingStyle = MaterialTheme.typography.titleSmall.copy(
+                    fontSize = (display.tafsirSp + 2f).sp,
+                    lineHeight = ((display.tafsirSp + 2f) * 1.45f).sp
+                )
+                paragraphs.forEachIndexed { paragraphIndex, paragraph ->
+                    when (paragraph.type) {
+                        TafsirStore.Paragraph.Type.QUOTE -> Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Q7HFootnoteText(paragraph.text, q7hFootnotes, "intro-tafsir-$paragraphIndex",
+                                modifier = Modifier.fillMaxWidth().padding(13.dp), style = bodyStyle)
+                        }
+                        TafsirStore.Paragraph.Type.HEADER -> Q7HFootnoteText(
+                            paragraph.text, q7hFootnotes, "intro-tafsir-$paragraphIndex",
+                            style = headingStyle, color = MaterialTheme.colorScheme.primary
+                        )
+                        TafsirStore.Paragraph.Type.BULLET -> Q7HFootnoteText(
+                            paragraph.text, q7hFootnotes, "intro-tafsir-$paragraphIndex",
+                            modifier = Modifier.padding(start = 14.dp), style = bodyStyle
+                        )
+                        TafsirStore.Paragraph.Type.BODY -> Q7HFootnoteText(
+                            paragraph.text, q7hFootnotes, "intro-tafsir-$paragraphIndex",
+                            style = bodyStyle
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 /** Word-by-word gloss, separate from the full translation and the Azan.ru tafsir. */
 @Composable
 private fun AyahWordDictionary(
@@ -561,6 +697,7 @@ private fun AyahAudioControls(
     reciterError: String,
     selectedReciter: String,
     onReciter: (String) -> Unit,
+    prefs: UserPreferences,
     endMode: AyahEndMode,
     onEndMode: (AyahEndMode) -> Unit,
     onPlay: () -> Unit
@@ -568,7 +705,14 @@ private fun AyahAudioControls(
     val idParts = playback.mediaId.split(':')
     val isCurrent = idParts.size >= 3 && idParts[0] == "ayah" &&
         idParts[1] == surah.toString() && idParts[2] == ayah.toString()
-    val currentReciter = reciters.firstOrNull { it.repository == selectedReciter }
+    // In ALL_RECITERS, the actual voice changes inside PlaybackService.
+    // Outside Person mode show the user's selected reciter, not the last voice
+    // that happened to be playing in the previous 43-reciter series.
+    val playingReciterRepository = if (endMode == AyahEndMode.ALL_RECITERS &&
+        isCurrent && idParts.size == 5) idParts[3] else selectedReciter
+    val currentReciter = reciters.firstOrNull { it.repository == playingReciterRepository }
+    val reciterFocusManager = LocalFocusManager.current
+    val reciterKeyboard = LocalSoftwareKeyboardController.current
     var reciterMenu by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf("") }
     var dragging by remember { mutableStateOf(false) }
@@ -577,8 +721,40 @@ private fun AyahAudioControls(
     val position = playback.positionMs
     val shownFraction = if (dragging) fraction else if (isCurrent && duration > 0)
         (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
+    // The recorder's current mediaId is NEVER the user's saved reciter preference.
+    // GitHub repo aliases are recognized without depending on their position in the list.
+    fun findReciter(id: String): Reciter? = reciters.firstOrNull { it.repository == id }
+    val suwaid = reciters.firstOrNull {
+        it.repository.removePrefix("q7h_").lowercase() in setOf("aymansowaid", "aymansuwaid")
+    }
+    fun preferredForPerson(): Reciter? {
+        findReciter(prefs.manuallySelectedReciter)?.let { return it }
+        // Migration: older builds only stored selectedReciter. The first entry
+        // was picked automatically; other stored entries are treated as manual.
+        val oldChosen = selectedReciter.takeIf { it.isNotBlank() &&
+            it != reciters.firstOrNull()?.repository }
+        findReciter(oldChosen.orEmpty())?.let {
+            prefs.manuallySelectedReciter = it.repository
+            return it
+        }
+        return suwaid ?: reciters.firstOrNull()
+    }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-        IconButton(onClick = onPlay, enabled = reciters.isNotEmpty()) {
+        IconButton(onClick = {
+            // When the service has advanced to another reciter, pausing must NOT
+            // unexpectedly restart the first voice chosen in MainActivity.
+            if (isCurrent && endMode == AyahEndMode.ALL_RECITERS && !playback.ended) {
+                if (playback.playing) controller?.pause()
+                else if (prefs.personNeedsFirstPlay) {
+                    prefs.personNeedsFirstPlay = false
+                    val wanted = prefs.reciterBeforeAllMode
+                    if (idParts.getOrNull(3) == wanted) {
+                        controller?.seekTo(0L)
+                        controller?.play()
+                    } else onPlay() // MainActivity uses selectedReciter, not the temporary service voice.
+                } else controller?.play() // Resume the CURRENT voice in the 43-reciter series.
+            } else onPlay()
+        }, enabled = reciters.isNotEmpty()) {
             Icon(if (isCurrent && playback.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
                 if (isCurrent && playback.playing) "Пауза аята $surah:$ayah" else "Слушать аят $surah:$ayah",
                 tint = MaterialTheme.colorScheme.primary)
@@ -593,21 +769,69 @@ private fun AyahAudioControls(
             val nextMode = when (endMode) {
                 AyahEndMode.STOP -> AyahEndMode.REPEAT
                 AyahEndMode.REPEAT -> AyahEndMode.NEXT
-                AyahEndMode.NEXT -> AyahEndMode.STOP
+                AyahEndMode.NEXT -> AyahEndMode.ALL_RECITERS
+                AyahEndMode.ALL_RECITERS -> AyahEndMode.REPEAT_N
+                AyahEndMode.REPEAT_N -> AyahEndMode.STOP
             }
-            IconButton(onClick = { onEndMode(nextMode) }, modifier = Modifier.size(40.dp)) {
-                Icon(when (endMode) {
-                    AyahEndMode.STOP -> Icons.Default.StopCircle
-                    AyahEndMode.REPEAT -> Icons.Default.RepeatOne
-                    AyahEndMode.NEXT -> Icons.Default.SkipNext
-                }, endMode.title, tint = MaterialTheme.colorScheme.primary)
+            IconButton(onClick = {
+                when {
+                    // Entering Person mode never changes the personal choice. Ayman
+                    // Rushdi Suwaid is the default ONLY if no choice was ever made.
+                    nextMode == AyahEndMode.ALL_RECITERS -> {
+                        val preferred = preferredForPerson()
+                        if (preferred != null) {
+                            prefs.reciterBeforeAllMode = preferred.repository
+                            prefs.personNeedsFirstPlay = !playback.playing
+                            if (selectedReciter != preferred.repository ||
+                                (playback.playing && idParts.getOrNull(3) != preferred.repository)) {
+                                onReciter(preferred.repository)
+                            }
+                        }
+                        onEndMode(nextMode)
+                    }
+                    // LEAVING Person mode restores user preference AND Media3 audio.
+                    endMode == AyahEndMode.ALL_RECITERS -> {
+                        val original = findReciter(prefs.reciterBeforeAllMode)
+                            ?: preferredForPerson()
+                        onEndMode(nextMode) // Set the new mode BEFORE restarting its audio.
+                        prefs.personNeedsFirstPlay = false
+                        if (original != null) {
+                            // This callback also resets the current Media3 track if playing.
+                            onReciter(original.repository)
+                        }
+                        prefs.reciterBeforeAllMode = ""
+                    }
+                    else -> onEndMode(nextMode)
+                }
+            }, modifier = Modifier.size(40.dp)) {
+                if (endMode == AyahEndMode.REPEAT_N) {
+                    // N is intentionally typographic, distinct from repeat-one.
+                    Text("N", fontSize = 20.sp, fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.primary)
+                } else {
+                    Icon(when (endMode) {
+                        AyahEndMode.STOP -> Icons.Default.StopCircle
+                        AyahEndMode.REPEAT -> Icons.Default.RepeatOne
+                        AyahEndMode.NEXT -> Icons.Default.SkipNext
+                        AyahEndMode.ALL_RECITERS -> Icons.Default.Person // Person WITHOUT the circle.
+                        AyahEndMode.REPEAT_N -> Icons.Default.RepeatOne
+                    }, endMode.title, tint = MaterialTheme.colorScheme.primary)
+                }
             }
         }
         Box {
             IconButton(onClick = { reciterMenu = true }) {
-                Icon(Icons.Default.AccountCircle, "Профиль чтеца: ${currentReciter?.title ?: "не выбран"}")
+                Icon(
+                    Icons.Default.AccountCircle,
+                    "Профиль чтеца: ${currentReciter?.title ?: "не выбран"}",
+                    tint = MaterialTheme.colorScheme.primary
+                )
             }
-            DropdownMenu(expanded = reciterMenu, onDismissRequest = { reciterMenu = false },
+            DropdownMenu(expanded = reciterMenu, onDismissRequest = {
+                reciterMenu = false
+                reciterFocusManager.clearFocus()
+                reciterKeyboard?.hide()
+            },
                 modifier = Modifier.heightIn(max = 370.dp)) {
                 Text("Выберите чтеца", modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.titleSmall)
@@ -616,6 +840,11 @@ private fun AyahAudioControls(
                 else {
                     OutlinedTextField(value = searching, onValueChange = { searching = it },
                         modifier = Modifier.width(250.dp).padding(horizontal = 8.dp),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = {
+                            reciterFocusManager.clearFocus()
+                            reciterKeyboard?.hide()
+                        }),
                         singleLine = true, placeholder = { Text("Поиск") })
                     val filtered = remember(reciters, searching) {
                         reciters.filter { searching.isBlank() || it.title.contains(searching, true) ||
@@ -627,13 +856,36 @@ private fun AyahAudioControls(
                                 if (reciter.repository == selectedReciter) Icon(Icons.Default.Check, null)
                                 else Spacer(Modifier.size(20.dp))
                             },
-                            onClick = { onReciter(reciter.repository); reciterMenu = false })
+                            onClick = {
+                                prefs.manuallySelectedReciter = reciter.repository
+                                if (endMode == AyahEndMode.ALL_RECITERS) {
+                                    prefs.reciterBeforeAllMode = reciter.repository
+                                    prefs.personNeedsFirstPlay = false
+                                }
+                                onReciter(reciter.repository)
+                                reciterMenu = false
+                                reciterFocusManager.clearFocus()
+                                reciterKeyboard?.hide()
+                            })
                     }
                 }
             }
         }
     }
 }
+/** Positions of all editable fields, measured in window coordinates. */
+private class Q7HSettingsFocusTracker {
+    var focusedId by mutableStateOf<String?>(null)
+    val rects = mutableStateMapOf<String, Rect>()
+
+    fun fieldModifier(id: String): Modifier = Modifier
+        .onFocusChanged { state ->
+            if (state.isFocused) focusedId = id
+            else if (focusedId == id) focusedId = null
+        }
+        .onGloballyPositioned { coordinates -> rects[id] = coordinates.boundsInWindow() }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsPanel(
@@ -648,8 +900,33 @@ fun SettingsPanel(
 ) {
     val scroll = rememberScrollState(initial = prefs.panelViewport("settings").second)
     PersistSettingsViewport(scroll, prefs)
-    Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(16.dp),
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val textFocus = remember { Q7HSettingsFocusTracker() }
+    var settingsCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    // Listening at the Initial pass does NOT consume taps or disrupt sliders/buttons.
+    // Check the active field's actual bounds to allow caret placement INSIDE it.
+    val clearOnOutsideTap = Modifier.onGloballyPositioned { settingsCoordinates = it }
+        .pointerInput(textFocus, focusManager) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false,
+                    pass = PointerEventPass.Initial)
+                val active = textFocus.focusedId
+                val rect = active?.let { textFocus.rects[it] }
+                val tap = settingsCoordinates?.localToWindow(down.position)
+                if (rect != null && tap != null && !rect.contains(tap)) {
+                    focusManager.clearFocus()
+                    keyboard?.hide()
+                }
+            }
+        }
+    Column(Modifier.fillMaxSize().then(clearOnOutsideTap).verticalScroll(scroll).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(13.dp)) {
+        // Q7H_TAJWEED_LEGEND: permanent, read-only QPC V4 reference before theme.
+        Q7HTajweedColorLegend(
+            dark = mode == "dark" || (mode == "system" && isSystemInDarkTheme())
+        )
+        HorizontalDivider()
         Text("Оформление и чтение", style = MaterialTheme.typography.headlineSmall)
         Text("Тема", style = MaterialTheme.typography.titleMedium)
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
@@ -703,9 +980,12 @@ fun SettingsPanel(
             OutlinedTextField(value = customSeconds,
                 onValueChange = { customSeconds = it.filter(Char::isDigit).take(5) },
                 label = { Text("Свой шаг") }, singleLine = true,
-                modifier = Modifier.weight(1f),
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
+                modifier = Modifier.weight(1f).then(textFocus.fieldModifier("seek_step")),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = {
+                    focusManager.clearFocus(); keyboard?.hide()
+                }))
             var unitMenu by remember { mutableStateOf(false) }
             Box {
                 TextButton(onClick = { unitMenu = true }) { Text(when (intervalUnit) {
@@ -726,7 +1006,40 @@ fun SettingsPanel(
                 prefs.hadrSeekIntervalSeconds = intervalSeconds
             }, enabled = newSeconds in 1L..86400L) { Text("OK") }
         }
-        // The controls are intentionally right AFTER the audio seek interval.
+        // Separate stored limits. They do not reset text/tajweed preferences.
+        HorizontalDivider()
+        Text("Повторения при прослушивании", style = MaterialTheme.typography.titleMedium)
+        Q7HRepeatCountSetting(
+            title = "Каждый из 43 чтецов — повторов одного аята",
+            value = prefs.allRecitersRepeatCount,
+            default = 1,
+            onSave = { prefs.allRecitersRepeatCount = it },
+            focusTracker = textFocus, fieldId = "reciters_n",
+            onDoneEditing = { focusManager.clearFocus(); keyboard?.hide() }
+        )
+        Q7HRepeatCountSetting(
+            title = "Тафсир: режим N (число чтений аята)",
+            value = prefs.ayahRepeatN,
+            default = 3,
+            onSave = { prefs.ayahRepeatN = it },
+            focusTracker = textFocus, fieldId = "ayah_n",
+            onDoneEditing = { focusManager.clearFocus(); keyboard?.hide() }
+        )
+        Q7HRepeatCountSetting(
+            title = "Коран за 7 часов: режим N (сура, страница, джуз, хизб, манзиль)",
+            value = prefs.hadrRepeatN,
+            default = 3,
+            onSave = { prefs.hadrRepeatN = it },
+            focusTracker = textFocus, fieldId = "hadr_n",
+            onDoneEditing = { focusManager.clearFocus(); keyboard?.hide() }
+        )
+        Text("Число от 1 до 1000 — общее количество воспроизведений, включая первое. " +
+            "После N чтений выбранный аят или раздел останавливается. " +
+            "Для разделов быстрого чтения нужны тайминги начала и конца; " +
+            "для ещё не размеченных разделов повтор недоступен.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // Tafsir display settings remain immediately below audio settings.
         HorizontalDivider()
         val context = androidx.compose.ui.platform.LocalContext.current
         val tafsirDisplay = remember(context.applicationContext) {
@@ -736,6 +1049,119 @@ fun SettingsPanel(
         Spacer(Modifier.height(20.dp))
     }
 }
+/**
+ * Read-only legend of the EIGHT official QPC/QCF V4 colour groups.
+ * This UI does not modify the font palette, tajweed detection, or user settings.
+ * Colours are taken from the QFC4 tajweed palette reference.
+ */
+private data class Q7HTajweedLegendRule(
+    val color: Color,
+    val title: String
+)
+
+private val q7hTajweedLegendRules = listOf(
+    Q7HTajweedLegendRule(Color(0xFF999999), "Не произносится"),
+    Q7HTajweedLegendRule(Color(0xFFDED537), "Мадд — удлинение (2 хараката)"),
+    Q7HTajweedLegendRule(Color(0xFFFE7D03), "Мадд мунфасыль — раздельное удлинение (2, 4 или 6 харакатов)"),
+    Q7HTajweedLegendRule(Color(0xFFFF4D8E), "Мадд муттасыль — слитное удлинение (4–5 харакатов)"),
+    Q7HTajweedLegendRule(Color(0xFFE30000), "Мадд лазим — обязательное удлинение (6 харакатов)"),
+    Q7HTajweedLegendRule(Color(0xFF26B55D), "Гунна и ихфа — носовое звучание (удлинение на 2 хараката)"),
+    Q7HTajweedLegendRule(Color(0xFF00DEFF), "Калькаля — отрывистый отзвук"),
+    Q7HTajweedLegendRule(Color(0xFF3C84D5), "Тафхим — твёрдое произношение"),
+)
+
+@Composable
+private fun Q7HTajweedColorLegend(dark: Boolean) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("Неизменяемые настройки", style = MaterialTheme.typography.headlineSmall)
+        Text("Цвета таджвида · QPC V4", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "Памятка по цветам оригинального таджвида. Эти цвета встроены в шрифт " +
+                "и не меняются в настройках приложения.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(13.dp)
+            ) {
+                q7hTajweedLegendRules.forEach { rule ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Surface(
+                            modifier = Modifier.size(22.dp),
+                            color = rule.color,
+                            shape = RoundedCornerShape(50),
+                            border = BorderStroke(
+                                1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                            )
+                        ) {}
+                        Text(
+                            rule.title,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            }
+        }
+        Text(
+            "Харакат — мера длительности звука. Памятка отображает закреплённые обозначения правил; " +
+                "оригинальный QPC V4 использует встроенную палитру для каждой темы.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/** Numeric editor; commits only validated 1..1000 values. */
+@Composable
+private fun Q7HRepeatCountSetting(
+    title: String, value: Int, default: Int, onSave: (Int) -> Unit,
+    focusTracker: Q7HSettingsFocusTracker, fieldId: String,
+    onDoneEditing: () -> Unit
+) {
+    var saved by remember { mutableIntStateOf(value.coerceIn(1, 1000)) }
+    var input by remember { mutableStateOf(saved.toString()) }
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(title, style = MaterialTheme.typography.bodyMedium)
+        Row(verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = input,
+                onValueChange = { input = it.filter(Char::isDigit).take(4) },
+                singleLine = true,
+                label = { Text("1–1000") },
+                isError = (input.toIntOrNull() ?: 0) !in 1..1000,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { onDoneEditing() }),
+                modifier = Modifier.weight(1f).then(focusTracker.fieldModifier(fieldId))
+            )
+            val candidate = input.toIntOrNull()
+            TextButton(onClick = {
+                val n = candidate ?: return@TextButton
+                onSave(n)
+                saved = n
+            }, enabled = candidate != null && candidate in 1..1000 && candidate != saved) {
+                Text("OK")
+            }
+            IconButton(onClick = {
+                saved = default
+                input = default.toString()
+                onSave(default)
+            }) { Icon(Icons.Default.Refresh, "Сбросить значение до $default") }
+        }
+    }
+}
+
 @Composable
 private fun SettingsSwitch(label: String, enabled: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -785,3 +1211,4 @@ internal fun russianWordCount(count: Int): String {
     }
     return "$count $suffix"
 }
+

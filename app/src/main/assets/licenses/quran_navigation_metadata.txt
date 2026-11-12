@@ -1,0 +1,13 @@
+Quran7Hours navigation boundary metadata attribution
+
+The 120 half-hizb starting verse references used for the navigation tree
+are derived from the Tanzil Quran Metadata (240 hizb quarter start positions).
+Source: https://tanzil.net/docs/quran_metadata
+Dataset format consulted: https://github.com/Mushaf-Learning/quran-text/blob/main/metadata/quran-data.xml
+Original Tanzil Quran Metadata: Creative Commons Attribution 3.0
+License: https://creativecommons.org/licenses/by/3.0/
+
+Transformation: extracted every second rub' al-hizb start to provide
+120 half-hizb divisions, four per juz and two per hizb. Quran7Hours uses
+its own Azan.ru verse/page assets to resolve physical page numbers.
+2026-11-12.

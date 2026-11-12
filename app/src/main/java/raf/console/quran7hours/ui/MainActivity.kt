@@ -167,9 +167,16 @@ private fun Quran7HoursScreen(activity: MainActivity) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val pager = rememberPagerState(initialPage = prefs.lastPage - 1, pageCount = { QuranCatalog.TOTAL_PAGES })
     val page = pager.currentPage + 1
-    val inkStrokes = remember(page) {
-        mutableStateListOf<InkStroke>().also { it.addAll(learningDb.loadInk(page)) }
+    // The exact same stroke list is shared by the active page and its pager leaf.
+    // This prevents the previous page from losing its covers midway through a swipe.
+    val inkPageCache = remember(learningDb) {
+        mutableMapOf<Int, androidx.compose.runtime.snapshots.SnapshotStateList<InkStroke>>()
     }
+    fun strokesForPage(number: Int): androidx.compose.runtime.snapshots.SnapshotStateList<InkStroke> =
+        inkPageCache.getOrPut(number) {
+            mutableStateListOf<InkStroke>().also { it.addAll(learningDb.loadInk(number)) }
+        }
+    val inkStrokes = remember(page) { strokesForPage(page) }
     val inkUndoHistory = remember(page) { mutableStateListOf<List<InkStroke>>() }
     val inkRedoHistory = remember(page) { mutableStateListOf<List<InkStroke>>() }
     var inkCheckpoint by remember(page) { mutableStateOf(inkStrokes.toList()) }
@@ -460,6 +467,8 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                         beyondViewportPageCount = 1,
                         userScrollEnabled = !inkEditing
                     ) { index ->
+                        val leafPage = index + 1
+                        val leafStrokes = remember(leafPage) { strokesForPage(leafPage) }
                         val bitmap by produceState<android.graphics.Bitmap?>(null, index, variant) {
                             value = mushaf.load(index + 1, variant)
                         }
@@ -468,8 +477,8 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                 canvasColor = Color(mushaf.backdropColor(bitmap!!))
                             }
                         }
-                        // Pager handles the touch gesture only. The OVERLAPPING leaf is
-                        // rendered once above it, never in the Pager's sliding rectangles.
+                        // The image AND its marks live inside one pager leaf and share
+                        // the same translation throughout a right-to-left swipe.
                         Box(
                             Modifier.fillMaxSize()
                                 .background(canvasColor)
@@ -492,14 +501,39 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                             contentAlignment = Alignment.Center
                         ) {
                             if (bitmap != null) {
-                                // Exact unwarped bitmap beneath the overlay. The overlay
-                                // covers BOTH pages while the book leaf is being turned.
+                                // Both the printed page and its annotations move together.
                                 Image(
                                     bitmap = bitmap!!.asImageBitmap(),
                                     contentDescription = "Мусхаф, страница ${index + 1}",
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Fit
                                 )
+                                if (showInk) {
+                                    val inkBackdrop = remember(bitmap) { Color(mushaf.backdropColor(bitmap!!)) }
+                                    InkPageLayer(
+                                        bitmap = bitmap!!,
+                                        strokes = leafStrokes,
+                                        tool = inkTool,
+                                        inkColor = inkColor,
+                                        width = inkSize,
+                                        editable = inkEditing && leafPage == page,
+                                        // Use the physical page backdrop, not the outgoing page.
+                                        coverColor = inkBackdrop,
+                                        onChanged = {
+                                            if (leafPage == page) {
+                                                val next = leafStrokes.toList()
+                                                if (next != inkCheckpoint) {
+                                                    inkUndoHistory.add(inkCheckpoint)
+                                                    if (inkUndoHistory.size > 30) inkUndoHistory.removeAt(0)
+                                                    inkCheckpoint = next
+                                                    inkRedoHistory.clear()
+                                                    learningDb.saveInk(leafPage, next)
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
                             } else {
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -526,25 +560,7 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                         modifier = Modifier.fillMaxSize()
                     )
                 }
-                // Page-relative annotations are drawn over the original image; no WebP changes.
-                val inkBitmap by produceState<android.graphics.Bitmap?>(null, page, variant) {
-                    value = mushaf.load(page, variant)
-                }
-                if (showInk && inkBitmap != null) {
-                    InkPageLayer(bitmap = inkBitmap!!, strokes = inkStrokes,
-                        tool = inkTool, inkColor = inkColor, width = inkSize,
-                        editable = inkEditing, coverColor = canvasColor,
-                        onChanged = {
-                            val next = inkStrokes.toList()
-                            if (next != inkCheckpoint) {
-                                inkUndoHistory.add(inkCheckpoint)
-                                if (inkUndoHistory.size > 30) inkUndoHistory.removeAt(0)
-                                inkCheckpoint = next
-                                inkRedoHistory.clear()
-                                learningDb.saveInk(page, next)
-                            }
-                        }, modifier = Modifier.fillMaxSize())
-                }
+                // Ink is now inside every pager leaf, not in a stationary global overlay.
                 if (inkEditing) {
                     Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 46.dp)
                         .offset(y = inkToolbarOffsetDp.dp)) {
@@ -885,7 +901,7 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                         onPrevious = { goToPage(page - 1) },
                         onNext = { goToPage(page + 1) }
                     )
-                    SheetSection.HAFIZ -> HafizDiaryPanel(
+                    SheetSection.HAFIZ -> HafizDiaryPanelEnhanced(
                         page = page, tafsir = tafsir, prefs = prefs, db = learningDb,
                         tajweed = tajweed,
                         onPrevious = { goToPage(page - 1) },
@@ -907,218 +923,3 @@ private fun Quran7HoursScreen(activity: MainActivity) {
         }
     }
 }
-
-@Composable
-private fun NavigationContent(
-    segment: QuranCatalog.Segment,
-    onSegment: (QuranCatalog.Segment) -> Unit,
-    currentPage: Int,
-    highlightedSurah: Int?,
-    descriptions: CatalogDetails,
-    onClick: (QuranCatalog.Segment, Int) -> Unit,
-    onJumpAyah: (Int, Int) -> Unit
-) {
-    val count = QuranCatalog.startPages(segment).size
-    val active = if (segment == QuranCatalog.Segment.SURAH) highlightedSurah
-        ?: QuranCatalog.segmentForPage(segment, currentPage)
-    else QuranCatalog.segmentForPage(segment, currentPage)
-    val listState = remember(segment) { androidx.compose.foundation.lazy.LazyListState() }
-    var showPageDialog by remember { mutableStateOf(false) }
-    LaunchedEffect(segment, active) {
-        if (active in 1..count) listState.scrollToItem(active - 1)
-    }
-    Column(Modifier.fillMaxSize()) {
-        OutlinedButton(
-            onClick = { showPageDialog = true },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Icon(Icons.Default.FindInPage, null)
-            Spacer(Modifier.width(8.dp))
-            Text("Перейти")
-        }
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(5.dp)
-        ) {
-            QuranCatalog.Segment.entries.forEach { option ->
-                FilterChip(
-                    selected = option == segment,
-                    onClick = { onSegment(option) },
-                    label = { Text(option.title) }
-                )
-            }
-        }
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp)
-        ) {
-            items(count, key = { "${segment.name}:$it" }) { i ->
-                val number = i + 1
-                val selected = active == number
-                val details by produceState("Загрузка сведений…", segment, number) {
-                    value = descriptions.description(segment, number)
-                }
-                Surface(
-                    onClick = { onClick(segment, number) },
-                    color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                ) {
-                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            number.toString(), modifier = Modifier.width(48.dp),
-                            maxLines = 1, softWrap = false, fontSize = 14.sp,
-                            textAlign = TextAlign.Center,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
-                        )
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                QuranCatalog.label(segment, number),
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
-                            )
-                            Text(
-                                details,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if (showPageDialog) {
-        PageJumpDialog(
-            initialPage = currentPage,
-            descriptions = descriptions,
-            onDismiss = { showPageDialog = false },
-            onGo = { target ->
-                showPageDialog = false
-                onClick(QuranCatalog.Segment.PAGE, target)
-            },
-            onGoAyah = { surah, ayah ->
-                showPageDialog = false
-                onJumpAyah(surah, ayah)
-            }
-        )
-    }
-}
-
-/** Two real destinations: exact page or (surah, ayah) from the tafsir JSON. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun PageJumpDialog(
-    initialPage: Int,
-    descriptions: CatalogDetails,
-    onDismiss: () -> Unit,
-    onGo: (Int) -> Unit,
-    onGoAyah: (Int, Int) -> Unit
-) {
-    var mode by rememberSaveable { mutableStateOf("page") }
-    var input by rememberSaveable { mutableStateOf(initialPage.toString()) }
-    var surah by rememberSaveable {
-        mutableIntStateOf(QuranCatalog.segmentForPage(QuranCatalog.Segment.SURAH, initialPage))
-    }
-    var ayah by rememberSaveable { mutableIntStateOf(1) }
-    val page = input.toIntOrNull()?.takeIf { it in 1..604 }
-    val preview by produceState("Введите страницу от 1 до 604", page) {
-        value = if (page == null) "Введите страницу от 1 до 604"
-        else descriptions.pageDescription(page)
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Перейти") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    listOf("page" to "Страница", "ayah" to "Аят").forEachIndexed { i, pair ->
-                        SegmentedButton(
-                            selected = mode == pair.first,
-                            onClick = { mode = pair.first },
-                            shape = SegmentedButtonDefaults.itemShape(i, 2)
-                        ) { Text(pair.second) }
-                    }
-                }
-                if (mode == "page") {
-                    OutlinedTextField(
-                        value = input,
-                        onValueChange = { input = it.filter(Char::isDigit).take(3) },
-                        singleLine = true,
-                        label = { Text("Страница (1–604)") },
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Number,
-                            imeAction = ImeAction.Done
-                        ),
-                        isError = page == null,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Text(preview, style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else {
-                    JumpNumberDropdown(
-                        title = "Сура",
-                        value = surah,
-                        max = 114,
-                        labelFor = { n -> "$n. ${QuranCatalog.surahNames[n - 1]}" },
-                        onSelect = { chosen -> surah = chosen; ayah = 1 }
-                    )
-                    JumpNumberDropdown(
-                        title = "Аят",
-                        value = ayah,
-                        max = QuranCatalog.ayahCounts[surah - 1],
-                        labelFor = { n -> "Аят $n" },
-                        onSelect = { ayah = it }
-                    )
-                    Text("Откроется страница мусхафа, содержащая выбранный аят.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    if (mode == "page") page?.let(onGo)
-                    else onGoAyah(surah, ayah)
-                },
-                enabled = mode != "page" || page != null
-            ) { Text("Перейти") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
-    )
-}
-
-@Composable
-private fun JumpNumberDropdown(
-    title: String,
-    value: Int,
-    max: Int,
-    labelFor: (Int) -> String,
-    onSelect: (Int) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
-            Text("$title: ${labelFor(value)}", modifier = Modifier.weight(1f), maxLines = 1)
-            Icon(Icons.Default.ArrowDropDown, null)
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            modifier = Modifier.widthIn(min = 240.dp)
-        ) {
-            // DropdownMenu itself provides scrolling. Nested LazyColumn here
-            // crashes during intrinsic measurement on some Compose versions.
-            for (number in 1..max.coerceAtMost(286)) {
-                DropdownMenuItem(
-                    text = { Text(labelFor(number), maxLines = 1) },
-                    onClick = { onSelect(number); expanded = false }
-                )
-            }
-        }
-    }
-}
-

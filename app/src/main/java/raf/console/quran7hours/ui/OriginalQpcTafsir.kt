@@ -21,6 +21,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.Dispatchers
+import androidx.compose.ui.unit.sp
+import android.util.TypedValue
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -103,23 +105,27 @@ internal class OriginalQpcTafsirRepository(context: Context) {
         val index = getVersePageIndex()
         val result = LinkedHashMap<Pair<Int, Int>, OriginalQpcAyah>()
         for (verse in verses) {
-            // Q7H_FATIHA_SPLIT_6_7_20261112
-            // Hanafi Al-Fatiha excludes Basmala from the seven numbered ayahs.
-            // QPC canonical ayahs: Hanafi 1..5 -> QPC 2..6; Hanafi 6 and 7 -> QPC 7.
+            // The Azan.ru Hanafi numbering of al-Fatiha is preserved. The QPC
+            // source treats basmala as 1:1 and combines Hanafi 1:6+1:7 in QPC 1:7.
             val key = verse.surah to verse.ayah
             val qpcAyah = when {
                 verse.surah == 1 && verse.ayah in 1..5 -> verse.ayah + 1
                 verse.surah == 1 && verse.ayah in 6..7 -> 7
                 else -> verse.ayah
             }
-            val pages = index[verseId(verse.surah, qpcAyah)]
-            if (pages.isNullOrEmpty()) {
-                Log.w(LOG_TAG, "No QPC layout for ${verse.surah}:${verse.ayah} (QPC $qpcAyah)")
+            // The application bundles a classic (1405H) page-layout JSON while
+            // the QCF V2/V4 page fonts follow the newer (1440H) pagination.
+            // For 5:77 the GLYPHS are stored in page-121.json, but those glyph
+            // codes are defined in p120.ttf. Always search the index for the
+            // source words; a font-page override must never change the data page.
+            val pages = index[verseId(verse.surah, qpcAyah)].orEmpty()
+            if (pages.isEmpty()) {
+                Log.w(LOG_TAG, "No verified QPC layout for ${verse.surah}:${verse.ayah} (QPC $qpcAyah)")
                 continue
             }
             val canonicalWords = ArrayList<OriginalQpcWord>()
-            for (p in pages) {
-                canonicalWords.addAll(wordsForPage(p).filter {
+            for (physicalPage in pages) {
+                canonicalWords.addAll(wordsForPage(physicalPage).filter {
                     it.surah == verse.surah && it.ayah == qpcAyah
                 })
             }
@@ -129,14 +135,29 @@ internal class OriginalQpcTafsirRepository(context: Context) {
                 Log.w(LOG_TAG, "Incomplete QPC words for ${verse.surah}:$qpcAyah")
                 continue
             }
+            if (verse.surah == 5 && verse.ayah == 77) {
+                // QCF page-font correction for the old Mushaf layout: all 23
+                // word codes U+FCCF..U+FCE5 (and the verse-end U+FCE6) are
+                // present in p120.ttf, not p121.ttf. Check the EXACT sequence
+                // before assigning that font to protect against incompatible
+                // layout packs. Do not alter Arabic words or glyph codes.
+                val correctCodes = canonicalWords.size == 23 &&
+                    canonicalWords.all { it.page == 121 } &&
+                    canonicalWords.first().glyphs.firstOrNull() == '\uFCCF' &&
+                    canonicalWords.last().glyphs.contains('\uFCE5') &&
+                    canonicalWords.last().glyphs.contains('\uFCE6')
+                if (!correctCodes) {
+                    Log.e(LOG_TAG, "5:77: unexpected classic-layout QPC codes, refuse mismatched font; " +
+                        "sourcePages=${canonicalWords.map { it.page }.distinct()}, words=${canonicalWords.size}")
+                    continue
+                }
+            }
             val words: List<OriginalQpcWord> = if (verse.surah == 1 && verse.ayah in 6..7) {
-                // Surah 1, QPC ayah 7 has precisely nine words:
-                // Hanafi 1:6 = first four, Hanafi 1:7 = remaining five.
-                // Use word numbers, not a fuzzy text-based split.
+                // Explicit Hanafi 1:6 = four words, 1:7 = five words.
                 if (canonicalWords.size != 9 ||
                     !qpcSkeleton(canonicalWords[0].word).startsWith("صر") ||
                     !qpcSkeleton(canonicalWords[4].word).startsWith("غير")) {
-                    Log.w(LOG_TAG, "Unexpected QPC Fatiha 1:7 word sequence; safe fallback")
+                    Log.w(LOG_TAG, "Unexpected QPC Fatiha 1:7 word sequence; Unicode fallback")
                     continue
                 }
                 if (verse.ayah == 6) canonicalWords.subList(0, 4)
@@ -144,27 +165,34 @@ internal class OriginalQpcTafsirRepository(context: Context) {
             } else canonicalWords
             val qpcArabic = words.joinToString(" ") { it.word }
             if (!likelySameVerse(verse.arabic, qpcArabic)) {
-                Log.w(LOG_TAG, "Different Quran text for ${verse.surah}:${verse.ayah}; safe fallback")
+                Log.w(LOG_TAG, "Different Quran text for ${verse.surah}:${verse.ayah}; safe Unicode fallback")
                 continue
             }
-
-            // Preserve source page boundaries: each segment must be shaped
-            // by the *corresponding page-specific* QPC V2 or V4 Typeface.
             val parts = ArrayList<OriginalQpcPart>()
             for (word in words) {
-                if (word.glyphs.isEmpty()) continue
+                if (word.glyphs.isBlank()) continue
+                // Source: classic layout page-121.json; QCF font: p120.ttf.
+                // Other verses keep their existing source-page/font mapping.
+                val fontPage = if (verse.surah == 5 && verse.ayah == 77) 120 else word.page
                 val previous = parts.lastOrNull()
-                if (previous != null && previous.page == word.page) {
+                if (previous != null && previous.page == fontPage) {
                     parts[parts.lastIndex] = previous.copy(glyphs = previous.glyphs + " " + word.glyphs)
                 } else {
-                    parts.add(OriginalQpcPart(word.page, word.glyphs))
+                    parts.add(OriginalQpcPart(fontPage, word.glyphs))
                 }
             }
-            if (parts.isNotEmpty()) result[key] = OriginalQpcAyah(parts)
+            if (parts.isNotEmpty()) {
+                if (verse.surah == 5 && verse.ayah == 77) {
+                    Log.i(LOG_TAG, "5:77: source=page-121.json, font=p120.ttf, " +
+                        "sourceWords=${words.size}, QCF glyphs=${parts.sumOf { it.glyphs.length }}")
+                }
+                result[key] = OriginalQpcAyah(parts)
+            }
         }
         result
     }
 
+    /** Cache the physical QPC page(s) for each canonical ayah. */
     private suspend fun getVersePageIndex(): Map<Long, List<Int>> {
         versePages?.let { return it }
         return indexLock.withLock {
@@ -247,6 +275,9 @@ private fun qpcSkeleton(input: String): String = buildString(input.length) {
         appendCodePoint(normalized)
     }
 }
+
+private fun levenshteinForSmallVerse(a: String, b: String): Int =
+    boundedDistance(a, b, max(a.length, b.length))
 
 private fun likelySameVerse(azanText: String, qpcText: String): Boolean {
     val azan = qpcSkeleton(azanText)
@@ -335,81 +366,25 @@ private object QpcSharedFonts {
     }
 }
 
-/** Render with original QPC glyph colors (V4) / original plain glyphs (V2). */
+/**
+ * Unified QPC renderer shared by Hafiz Diary and Tafsir.
+ * The adjustable renderer loads the actual page-specific font as the TextView
+ * base, and selects the built-in dark V4 palette while preserving color tajweed
+ * and decorative verse-number ornaments. This also preserves the verified
+ * 5:77 source-page-121 / font-page-120 mapping from this repository.
+ */
 @Composable
-internal fun OriginalQpcTafsirText(ayah: OriginalQpcAyah, tajweed: Boolean) {
-    val color = MaterialTheme.colorScheme.onSurface.toArgb()
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val fonts = remember(context) { QpcSharedFonts.forContext(context) }
-    AndroidView(
-        modifier = Modifier.fillMaxWidth(),
-        factory = { ctx ->
-            TextView(ctx).apply {
-                gravity = Gravity.RIGHT
-                textDirection = View.TEXT_DIRECTION_RTL
-                layoutDirection = View.LAYOUT_DIRECTION_RTL
-                textAlignment = View.TEXT_ALIGNMENT_GRAVITY
-                textSize = 29f
-                includeFontPadding = false
-                setLineSpacing(0f, 1f)
-                breakStrategy = android.text.Layout.BREAK_STRATEGY_SIMPLE
-                hyphenationFrequency = android.text.Layout.HYPHENATION_FREQUENCY_NONE
-                setTextIsSelectable(false)
-                // Avoid TextView adding top/bottom font padding beyond measured line boxes.
-                setPadding(0, 0, 0, 0)
-            }
-        },
-        update = { view ->
-            view.setTextColor(color)
-            // Skip rebuilding spans on every Media3 playback progress update.
-            val signature = ayah to tajweed
-            if (view.tag != signature) {
-                val text = SpannableStringBuilder()
-                val metricProbe = TextPaint(view.paint)
-                val glyphBounds = Rect()
-                var inkTop = 0
-                var inkBottom = 0
-                var missingFont = false
-                ayah.parts.forEachIndexed { index, part ->
-                    if (index > 0) text.append(' ')
-                    val start = text.length
-                    text.append(part.glyphs)
-                    val font = fonts.get(part.page, tajweed)
-                    if (font == null) {
-                        missingFont = true
-                    } else {
-                        text.setSpan(QpcFontSpan(font), start, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                        metricProbe.typeface = font
-                        metricProbe.getTextBounds(part.glyphs, 0, part.glyphs.length, glyphBounds)
-                        inkTop = min(inkTop, glyphBounds.top)
-                        inkBottom = max(inkBottom, glyphBounds.bottom)
-                    }
-                }
-                // A missing page font is an installation problem, not a reason
-                // to show PUA characters with a completely different typeface.
-                if (missingFont) {
-                    view.text = ""
-                    Log.e(LOG_TAG, "One or more QPC fonts missing for pages ${ayah.parts.map { it.page }}")
-                } else {
-                    // Extra room for high madd/hamza/diacritics; ink-based height
-                    // is much smaller than the font's advertised ascender/descender.
-                    val safety = ceil(view.textSize * 0.13).toInt()
-                    val above = max(ceil(view.textSize * 0.78).toInt(), -inkTop + safety)
-                    val below = max(ceil(view.textSize * 0.25).toInt(), inkBottom + safety)
-                    if (text.isNotEmpty()) {
-                        text.setSpan(
-                            QpcInkLineHeight(above, below), 0, text.length,
-                            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-                        )
-                    }
-                    view.text = text
-                }
-                view.tag = signature
-            }
-        }
-    )
+internal fun OriginalQpcTafsirText(
+    ayah: OriginalQpcAyah,
+    tajweed: Boolean,
+    fontSizeSp: Float = 29f
+) {
+    Q7HAdjustableOriginalQpcText(ayah, tajweed, fontSizeSp)
 }
 
+/** Preload the EXACT typefaces used by the visible ayahs before any TextView is displayed.
+ * Font loading only happens on Dispatchers.IO via QpcPreparedPages.
+ */
 internal fun warmOriginalQpcFonts(context: Context, ayahs: Collection<OriginalQpcAyah>) {
     val fonts = QpcSharedFonts.forContext(context)
     ayahs.asSequence().flatMap { it.parts.asSequence() }.map { it.page }.distinct().forEach { page ->

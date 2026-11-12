@@ -3,6 +3,7 @@ package raf.console.quran7hours.ui
 import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -101,10 +102,14 @@ internal fun TafsirDisplaySettingsSection(state: TafsirDisplayPreferences) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         HorizontalDivider()
-        fontSlider("Шрифт арабского текста", value.arabicSp, 18f..48f) { x -> state.change { it.copy(arabicSp = x) } }
-        fontSlider("Шрифт словаря аята", value.dictionarySp, 12f..32f) { x -> state.change { it.copy(dictionarySp = x) } }
-        fontSlider("Шрифт перевода", value.translationSp, 11f..30f) { x -> state.change { it.copy(translationSp = x) } }
-        fontSlider("Шрифт тафсира", value.tafsirSp, 11f..30f) { x -> state.change { it.copy(tafsirSp = x) } }
+        fontSlider("Шрифт арабского текста", value.arabicSp, 18f..48f, 29f,
+            change = { x -> state.change { it.copy(arabicSp = x) } })
+        fontSlider("Шрифт словаря аята", value.dictionarySp, 12f..32f, 19f,
+            change = { x -> state.change { it.copy(dictionarySp = x) } })
+        fontSlider("Шрифт перевода", value.translationSp, 11f..30f, 16f,
+            change = { x -> state.change { it.copy(translationSp = x) } })
+        fontSlider("Шрифт тафсира", value.tafsirSp, 11f..30f, 14f,
+            change = { x -> state.change { it.copy(tafsirSp = x) } })
         Spacer(Modifier.height(4.dp))
         OutlinedButton(onClick = { state.reset() }, modifier = Modifier.fillMaxWidth()) {
             Text("Вернуть заводские настройки тафсира")
@@ -132,10 +137,18 @@ private fun TafsirDisplayCheckbox(
     }
 }
 @Composable
-private fun fontSlider(label: String, size: Float, range: ClosedFloatingPointRange<Float>, change: (Float) -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, style = MaterialTheme.typography.bodyMedium)
+private fun fontSlider(
+    label: String, size: Float, range: ClosedFloatingPointRange<Float>,
+    factoryDefault: Float, change: (Float) -> Unit
+) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
         Text("${size.roundToInt()} sp", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+        IconButton(onClick = { change(factoryDefault) }, modifier = Modifier.size(40.dp)) {
+            Icon(androidx.compose.material.icons.Icons.Default.Refresh,
+                "Вернуть $label: ${factoryDefault.roundToInt()} sp")
+        }
     }
     Slider(
         value = size.coerceIn(range.start, range.endInclusive),

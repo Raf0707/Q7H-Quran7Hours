@@ -26,6 +26,9 @@ import raf.console.quran7hours.media.PrefacePart
  * 100% offline tafsir card using native Compose views only.
  * Before publishing, generate assets/tafsir_azan_ru/istiaza_basmala.json
  * with tools/import_azan_istiaza.py on the developer's computer.
+ *
+ * All [n] markers in this article share ONE navigator scoped to this preface
+ * card. They never share destinations with surah introductions or real ayahs.
  */
 @Composable
 fun IstiazaBasmalaCard(
@@ -34,8 +37,8 @@ fun IstiazaBasmalaCard(
 ) {
     val context = LocalContext.current
     val article = remember(context) { OfflinePrefaceArticle.read(context) }
+    val footnoteNavigator = remember(article) { Q7HFootnoteNavigator() }
     var expanded by rememberSaveable { mutableStateOf(true) }
-
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp)
@@ -99,7 +102,13 @@ fun IstiazaBasmalaCard(
                     )
                 } else {
                     article.blocks.forEachIndexed { index, block ->
-                        key(index) { OfflinePrefaceBlock(block) }
+                        key(index) {
+                            OfflinePrefaceBlock(
+                                block = block,
+                                navigator = footnoteNavigator,
+                                blockIndex = index
+                            )
+                        }
                     }
                     Text("Тафсир: Азан.ру",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -112,7 +121,6 @@ fun IstiazaBasmalaCard(
 
 private class OfflinePrefaceArticle(val blocks: List<Block>) {
     data class Block(val type: String, val text: String)
-
     companion object {
         fun read(context: Context): OfflinePrefaceArticle? = runCatching {
             val raw = context.assets.open("tafsir_azan_ru/istiaza_basmala.json")
@@ -133,26 +141,68 @@ private class OfflinePrefaceArticle(val blocks: List<Block>) {
 }
 
 @Composable
-private fun OfflinePrefaceBlock(block: OfflinePrefaceArticle.Block) {
+private fun OfflinePrefaceBlock(
+    block: OfflinePrefaceArticle.Block,
+    navigator: Q7HFootnoteNavigator,
+    blockIndex: Int
+) {
+    // A stable ID for EVERY paragraph, independent of the [n] numbers.
+    // The navigator belongs to the preface ONLY, never to the next ayah.
+    val paragraphId = "istiaza-basmala:block-$blockIndex"
     when (block.type) {
-        "heading" -> Text(block.text,
+        "heading" -> Q7HFootnoteText(
+            text = block.text,
+            navigator = navigator,
+            paragraphId = paragraphId,
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(top = 7.dp))
-        "arabic" -> Text(block.text, modifier = Modifier.fillMaxWidth(),
-            style = TextStyle(textDirection = TextDirection.Rtl),
-            fontSize = 23.sp, lineHeight = 38.sp, textAlign = TextAlign.Right)
-        "quote" -> Surface(color = MaterialTheme.colorScheme.primaryContainer,
-            shape = RoundedCornerShape(12.dp)) {
-            Text(block.text, modifier = Modifier.fillMaxWidth().padding(13.dp),
+            modifier = Modifier.padding(top = 7.dp)
+        )
+        "arabic" -> Q7HFootnoteText(
+            text = block.text,
+            navigator = navigator,
+            paragraphId = paragraphId,
+            modifier = Modifier.fillMaxWidth(),
+            style = TextStyle(
+                textDirection = TextDirection.Rtl,
+                fontSize = 23.sp,
+                lineHeight = 38.sp,
+                textAlign = TextAlign.Right
+            )
+        )
+        "quote" -> Surface(
+            color = MaterialTheme.colorScheme.primaryContainer,
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Q7HFootnoteText(
+                text = block.text,
+                navigator = navigator,
+                paragraphId = paragraphId,
+                modifier = Modifier.fillMaxWidth().padding(13.dp),
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer)
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
         }
-        "bullet" -> Text("• ${block.text}", modifier = Modifier.padding(start = 14.dp),
-            style = MaterialTheme.typography.bodyMedium)
-        "footnote" -> Text(block.text, style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-        else -> Text(block.text, style = MaterialTheme.typography.bodyMedium)
+        "bullet" -> Q7HFootnoteText(
+            text = "• ${block.text}",
+            navigator = navigator,
+            paragraphId = paragraphId,
+            modifier = Modifier.padding(start = 14.dp),
+            style = MaterialTheme.typography.bodyMedium
+        )
+        "footnote" -> Q7HFootnoteText(
+            text = block.text,
+            navigator = navigator,
+            paragraphId = paragraphId,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        else -> Q7HFootnoteText(
+            text = block.text,
+            navigator = navigator,
+            paragraphId = paragraphId,
+            style = MaterialTheme.typography.bodyMedium
+        )
     }
 }
 

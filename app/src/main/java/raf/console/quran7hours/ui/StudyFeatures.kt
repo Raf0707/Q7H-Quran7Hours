@@ -626,7 +626,8 @@ internal fun InkPageLayer(
             if (pts.isEmpty() || stroke.tool == "text") return
             val col = (if (stroke.tool == "cover") coverColor else Color(stroke.color.toInt())).copy(alpha = when (stroke.tool) {
                 "marker" -> .32f
-                "cover" -> .97f
+                // A memorization cover must NEVER reveal the underlying ayah.
+                "cover" -> 1f
                 else -> 1f
             })
             val sw = (stroke.width * w).coerceAtLeast(2f)
