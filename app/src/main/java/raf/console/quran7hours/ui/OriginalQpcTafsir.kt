@@ -409,3 +409,11 @@ internal fun OriginalQpcTafsirText(ayah: OriginalQpcAyah, tajweed: Boolean) {
         }
     )
 }
+
+internal fun warmOriginalQpcFonts(context: Context, ayahs: Collection<OriginalQpcAyah>) {
+    val fonts = QpcSharedFonts.forContext(context)
+    ayahs.asSequence().flatMap { it.parts.asSequence() }.map { it.page }.distinct().forEach { page ->
+        fonts.get(page, true)
+        fonts.get(page, false)
+    }
+}
