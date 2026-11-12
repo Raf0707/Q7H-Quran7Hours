@@ -28,7 +28,7 @@ internal class TafsirDisplayPreferences(context: Context) {
         showArabic = prefs.getBoolean("arabic", true),
         showDictionary = prefs.getBoolean("dictionary", true),
         showTranslation = prefs.getBoolean("translation", true),
-        showTafsir = prefs.getBoolean("tafsir", true),
+        showTafsir = prefs.getBoolean("tafsir", true) && prefs.getBoolean("translation", true),
         arabicSp = prefs.getFloat("arabic_sp", 29f).coerceIn(18f, 48f),
         dictionarySp = prefs.getFloat("dictionary_sp", 19f).coerceIn(12f, 32f),
         translationSp = prefs.getFloat("translation_sp", 16f).coerceIn(11f, 30f),
@@ -38,7 +38,9 @@ internal class TafsirDisplayPreferences(context: Context) {
         private set
 
     fun change(update: (TafsirDisplayOptions) -> TafsirDisplayOptions) {
-        val v = update(value)
+        val updated = update(value)
+        // A tafsir without the full translation is not a supported display mode.
+        val v = if (updated.showTranslation) updated else updated.copy(showTafsir = false)
         value = v
         prefs.edit()
             .putBoolean("arabic", v.showArabic)
@@ -72,10 +74,32 @@ internal fun TafsirDisplaySettingsSection(state: TafsirDisplayPreferences) {
     val value = state.value
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("Отображение тафсира", style = MaterialTheme.typography.titleMedium)
-        funCheck("Арабский текст", value.showArabic) { state.change { it.copy(showArabic = it.showArabic.not()) } }
-        funCheck("Словарь аята", value.showDictionary) { state.change { it.copy(showDictionary = !it.showDictionary) } }
-        funCheck("Перевод", value.showTranslation) { state.change { it.copy(showTranslation = !it.showTranslation) } }
-        funCheck("Тафсир", value.showTafsir) { state.change { it.copy(showTafsir = !it.showTafsir) } }
+        TafsirDisplayCheckbox("Арабский текст", value.showArabic) { checked ->
+            state.change { it.copy(showArabic = checked) }
+        }
+        TafsirDisplayCheckbox("Словарь аята", value.showDictionary) { checked ->
+            state.change { it.copy(showDictionary = checked) }
+        }
+        TafsirDisplayCheckbox("Перевод", value.showTranslation) { checked ->
+            state.change {
+                it.copy(showTranslation = checked, showTafsir = checked && it.showTafsir)
+            }
+        }
+        TafsirDisplayCheckbox(
+            "Тафсир (только вместе с переводом)",
+            value.showTafsir,
+            enabled = value.showTranslation
+        ) { checked ->
+            state.change { it.copy(showTafsir = checked) }
+        }
+        if (!value.showTranslation) {
+            Text("Чтобы включить тафсир, сначала включите перевод.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text("Номер аята, воспроизведение и выбор чтеца видны всегда.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
         HorizontalDivider()
         fontSlider("Шрифт арабского текста", value.arabicSp, 18f..48f) { x -> state.change { it.copy(arabicSp = x) } }
         fontSlider("Шрифт словаря аята", value.dictionarySp, 12f..32f) { x -> state.change { it.copy(dictionarySp = x) } }
@@ -83,19 +107,30 @@ internal fun TafsirDisplaySettingsSection(state: TafsirDisplayPreferences) {
         fontSlider("Шрифт тафсира", value.tafsirSp, 11f..30f) { x -> state.change { it.copy(tafsirSp = x) } }
         Spacer(Modifier.height(4.dp))
         OutlinedButton(onClick = { state.reset() }, modifier = Modifier.fillMaxWidth()) {
-            Text("Сбросить настройки тафсира")
+            Text("Вернуть заводские настройки тафсира")
         }
     }
 }
 
 @Composable
-private fun funCheck(label: String, checked: Boolean, change: () -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-        Checkbox(checked = checked, onCheckedChange = { change() })
-        Text(label, style = MaterialTheme.typography.bodyLarge)
+private fun TafsirDisplayCheckbox(
+    label: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onChange: (Boolean) -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+    ) {
+        Checkbox(checked = checked, enabled = enabled, onCheckedChange = onChange)
+        Text(label,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (enabled) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
-
 @Composable
 private fun fontSlider(label: String, size: Float, range: ClosedFloatingPointRange<Float>, change: (Float) -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {

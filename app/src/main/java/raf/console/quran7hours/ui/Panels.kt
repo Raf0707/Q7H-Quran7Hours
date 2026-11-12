@@ -1,5 +1,4 @@
 package raf.console.quran7hours.ui
-
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -40,7 +39,6 @@ import kotlin.math.roundToLong
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
-
 private fun timeLabel(ms: Long): String {
     val seconds = ms.coerceAtLeast(0L) / 1000L
     return if (seconds >= 3600L) "%d:%02d:%02d".format(seconds / 3600, seconds / 60 % 60, seconds % 60)
@@ -52,7 +50,6 @@ private fun seekLabel(seconds: Int): String = when {
     seconds % 60 == 0 -> "${seconds / 60}м"
     else -> "${seconds}с"
 }
-
 /** Hadr-only chapter navigation with a single fixed-speed MP3 mini player. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,17 +65,21 @@ fun AudioPanel(
     onPlay: () -> Unit,
     onJump: (QuranCatalog.Segment, Int) -> Unit
 ) {
-    // No auto-scroll on playback updates: never override the user's reading position.
+    // Q7H_AUDIO_SCROLL_20261112: always open each category at its current mark.
+    // Player snapshots arrive every ~450ms, but this effect only acts when the
+    // ACTIVE NUMBER changes, not on every position update.
     val marks = remember(category, timings) { timings.marks(category) }
-    val viewportKey = remember(category) { "audio_${category.name.lowercase()}" }
-    val listState = remember(category) {
-        val (index, offset) = prefs.panelViewport(viewportKey)
-        LazyListState(index.coerceIn(0, (marks.size - 1).coerceAtLeast(0)), offset)
-    }
-    PersistLazyViewport(listState, prefs, viewportKey)
     val timedActive = if (playback.mediaId == "hadr") timings.at(category, playback.positionMs) else null
     val active = timedActive ?: QuranCatalog.segmentForPage(category, currentPage)
-
+    val initialIndex = marks.indexOfFirst { it.number == active }.coerceAtLeast(0)
+    val listState = remember(category) { LazyListState(initialIndex, 0) }
+    LaunchedEffect(category, active) {
+        val targetIndex = marks.indexOfFirst { it.number == active }
+        if (targetIndex >= 0 && (listState.firstVisibleItemIndex != targetIndex ||
+                listState.firstVisibleItemScrollOffset != 0)) {
+            listState.scrollToItem(targetIndex)
+        }
+    }
     Column(modifier = Modifier.fillMaxSize()) {
         Text("Коран за 7 часов", style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.padding(start = 16.dp, top = 10.dp, bottom = 8.dp))
@@ -164,7 +165,6 @@ fun AudioPanel(
         HadrMiniPlayer(playback, controller, timings, activeSurah, currentPage, onPlay, prefs)
     }
 }
-
 @Composable
 private fun HadrMiniPlayer(
     playback: PlaybackSnapshot,
@@ -185,13 +185,11 @@ private fun HadrMiniPlayer(
     val listening = playback.mediaId == "hadr"
     fun current(segment: QuranCatalog.Segment): Int? =
         if (listening) timings.at(segment, playback.positionMs) else null
-
     val surah = current(QuranCatalog.Segment.SURAH) ?: activeSurah
     val page = current(QuranCatalog.Segment.PAGE) ?: currentPage
     val juz = current(QuranCatalog.Segment.JUZ)
     val hizb = current(QuranCatalog.Segment.HIZB)
     val manzil = current(QuranCatalog.Segment.MANZIL)
-
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
         if (playback.error != null) {
             Text(playback.error, style = MaterialTheme.typography.labelSmall,
@@ -262,7 +260,6 @@ private fun HadrMiniPlayer(
         }
     }
 }
-
 /** Azan.ru tafsir keeps the same rich text design, with independent inline Ayah audio. */
 @Composable
 fun TafsirPanel(
@@ -302,6 +299,19 @@ fun TafsirPanel(
     // Original QPC V4/V2 glyphs from the earlier Quran7Hours app.
     // These are page-specific fonts, not Unicode text colored with SpanStyle.
     val context = androidx.compose.ui.platform.LocalContext.current
+    val displayPreferences = remember(context.applicationContext) {
+        SharedTafsirDisplayOptions.get(context.applicationContext)
+    }
+    val display = displayPreferences.value
+    val dictionaryOnly = display.showDictionary && !display.showArabic && !display.showTranslation
+    val tafsirBodyStyle = MaterialTheme.typography.bodyMedium.copy(
+        fontSize = display.tafsirSp.sp,
+        lineHeight = (display.tafsirSp * 1.5f).sp
+    )
+    val tafsirHeadingStyle = MaterialTheme.typography.titleSmall.copy(
+        fontSize = (display.tafsirSp + 2f).sp,
+        lineHeight = ((display.tafsirSp + 2f) * 1.45f).sp
+    )
     val originalQpc = remember(context) { OriginalQpcTafsirRepository(context) }
     val qpcVerses by produceState<Map<Pair<Int, Int>, OriginalQpcAyah>>(
         emptyMap(), page, verses
@@ -335,12 +345,23 @@ fun TafsirPanel(
                 CircularProgressIndicator()
             }
         } else {
-        // Critical: create the LazyList only AFTER the JSON has loaded. An empty
-        // placeholder would otherwise clamp a restored index back to zero.
+        // Q7H_TAFSIR_SCROLL_20261112:
+        // The last SEEN page is stored independently of its reading viewport.
+        // Reopening the same page restores the exact position. If the reader
+        // has turned the Mushaf or tapped tafsir arrows, open the NEW page at
+        // its beginning, even when it was previously read to the end.
+        // No change to MainActivity.kt is needed.
         val viewportKey = "tafsir_$page"
+        val lastViewedKey = "tafsir_last_opened_page_v2"
+        val previousViewedPage = remember(page) { prefs.panelViewport(lastViewedKey).first }
+        val pageChanged = previousViewedPage in 1..604 && previousViewedPage != page
         val listState = remember(page) {
-            val (index, offset) = prefs.panelViewport(viewportKey)
+            val (index, offset) = if (pageChanged) 0 to 0 else prefs.panelViewport(viewportKey)
             LazyListState(index.coerceIn(0, (loadedVerses.size - 1 + if (page == 1) 1 else 0).coerceAtLeast(0)), offset)
+        }
+        LaunchedEffect(page) {
+            if (pageChanged) prefs.savePanelViewport(viewportKey, 0, 0)
+            prefs.savePanelViewport(lastViewedKey, page, 0)
         }
         PersistLazyViewport(listState, prefs, viewportKey)
         LazyColumn(
@@ -383,52 +404,64 @@ fun TafsirPanel(
                                 onPlay = { onPlayVerse(verse.surah, verse.ayah) }
                             )
                         }
-                        if (verse.arabic.isNotBlank() || quranVerses[verse.surah to verse.ayah] != null) {
+                        if (display.showArabic &&
+                            (verse.arabic.isNotBlank() || quranVerses[verse.surah to verse.ayah] != null)) {
                             val key = verse.surah to verse.ayah
                             val original = qpcVerses[key]
                             if (original != null) {
                                 // Color is embedded in the real QPC V4 font;
                                 // the matching V2 font is used with Tajweed off.
-                                OriginalQpcTafsirText(original, tajweed)
+                                Q7HAdjustableOriginalQpcText(original, tajweed, display.arabicSp)
                             } else {
                                 // No QPC pack or incomplete/mismatched ayah:
                                 // keep the user's original Unicode font, without
                                 // inventing a 'classic' Tajweed palette.
-                                TafsirQuranText(
+                                Q7HAdjustableUnicodeArabicText(
                                     arabicFromAzan = verse.arabic,
-                                    verified = quranVerses[key],
-                                    tajweed = false
+                                    verifiedArabic = quranVerses[key]?.arabic,
+                                    fontSizeSp = display.arabicSp
                                 )
                             }
                         }
-                        AyahWordDictionary(
-                            verse.surah, verse.ayah,
-                            dictionaries[verse.surah to verse.ayah].orEmpty()
-                        )
-                        if (verse.translation.isNotBlank()) {
-                            HorizontalDivider()
-                            Text(verse.translation, style = MaterialTheme.typography.bodyLarge)
+                        if (display.showDictionary) {
+                            AyahWordDictionary(
+                                verse.surah, verse.ayah,
+                                dictionaries[verse.surah to verse.ayah].orEmpty(),
+                                fontSizeSp = display.dictionarySp,
+                                initiallyExpanded = dictionaryOnly
+                            )
                         }
-                        // Expensive HTML/quote parsing is memoized across 450 ms player updates.
-                        val formatted = remember(verse.explanation) { store.format(verse.explanation) }
-                        formatted.forEach { paragraph ->
-                            when (paragraph.type) {
+                        if (display.showTranslation && verse.translation.isNotBlank()) {
+                            HorizontalDivider()
+                            Text(
+                                verse.translation,
+                                fontSize = display.translationSp.sp,
+                                lineHeight = (display.translationSp * 1.5f).sp
+                            )
+                        }
+                        // Tafsir is only permitted together with the translation.
+                        // Memorize formatted paragraphs across Media3 progress updates.
+                        if (display.showTafsir && display.showTranslation) {
+                            val formatted = remember(verse.explanation) { store.format(verse.explanation) }
+                            formatted.forEach { paragraph ->
+                                when (paragraph.type) {
                                 TafsirStore.Paragraph.Type.QUOTE -> Surface(
                                     color = MaterialTheme.colorScheme.primaryContainer,
                                     shape = RoundedCornerShape(12.dp)) {
                                     Text(paragraph.text, modifier = Modifier.fillMaxWidth().padding(13.dp),
-                                        style = MaterialTheme.typography.bodyMedium)
+                                        style = tafsirBodyStyle)
                                 }
                                 TafsirStore.Paragraph.Type.HEADER -> Text(paragraph.text,
-                                    style = MaterialTheme.typography.titleSmall,
+                                    style = tafsirHeadingStyle,
                                     color = MaterialTheme.colorScheme.primary)
                                 TafsirStore.Paragraph.Type.BULLET -> Text(paragraph.text,
                                     modifier = Modifier.padding(start = 14.dp),
-                                    style = MaterialTheme.typography.bodyMedium)
+                                    style = tafsirBodyStyle)
                                 TafsirStore.Paragraph.Type.BODY -> Text(paragraph.text,
-                                    style = MaterialTheme.typography.bodyMedium)
+                                    style = tafsirBodyStyle)
+                                }
                             }
-                        }
+                        } // only show tafsir when its accompanying translation is enabled
                     }
                 }
             }
@@ -436,11 +469,17 @@ fun TafsirPanel(
     }
         }
 }
-
 /** Word-by-word gloss, separate from the full translation and the Azan.ru tafsir. */
 @Composable
-private fun AyahWordDictionary(surah: Int, ayah: Int, words: List<WordByWordStore.Word>) {
-    var expanded by remember(surah, ayah) { mutableStateOf(false) }
+private fun AyahWordDictionary(
+    surah: Int,
+    ayah: Int,
+    words: List<WordByWordStore.Word>,
+    fontSizeSp: Float,
+    initiallyExpanded: Boolean
+) {
+    var expanded by remember(surah, ayah, initiallyExpanded) { mutableStateOf(initiallyExpanded) }
+    val dictionaryTranslationSp = (fontSizeSp - 4f).coerceAtLeast(10f)
     val note = remember(surah, ayah) { AqidahVerseNotes.note(surah, ayah) }
     OutlinedCard(shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth()) {
@@ -454,7 +493,8 @@ private fun AyahWordDictionary(surah: Int, ayah: Int, words: List<WordByWordStor
                 ) {
                     Icon(Icons.Default.MenuBook, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Словарь аята", modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
+                    Text("Словарь аята", modifier = Modifier.weight(1f), textAlign = TextAlign.Start,
+                        fontSize = dictionaryTranslationSp.sp)
                     Text(if (words.isNotEmpty()) russianWordCount(words.size) else "—",
                         style = MaterialTheme.typography.labelMedium)
                     Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
@@ -471,7 +511,8 @@ private fun AyahWordDictionary(surah: Int, ayah: Int, words: List<WordByWordStor
                         Text(
                             "Пословный перевод пока недоступен для этого аята.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall
+                            fontSize = dictionaryTranslationSp.sp,
+                            lineHeight = (dictionaryTranslationSp * 1.4f).sp
                         )
                     } else {
                         // Every original word, every repetition; no Arabic roots or morphology.
@@ -481,10 +522,11 @@ private fun AyahWordDictionary(surah: Int, ayah: Int, words: List<WordByWordStor
                                 verticalAlignment = Alignment.Top,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Text(word.arabic, fontSize = 19.sp,
+                                Text(word.arabic, fontSize = fontSizeSp.sp,
                                     style = TextStyle(textDirection = TextDirection.Rtl))
                                 Text("— ${word.translationRu}", modifier = Modifier.weight(1f),
-                                    style = MaterialTheme.typography.bodyMedium)
+                                    fontSize = dictionaryTranslationSp.sp,
+                                    lineHeight = (dictionaryTranslationSp * 1.45f).sp)
                             }
                         }
                     }
@@ -495,10 +537,11 @@ private fun AyahWordDictionary(surah: Int, ayah: Int, words: List<WordByWordStor
                         ) {
                             Column(Modifier.fillMaxWidth().padding(12.dp)) {
                                 Text("Примечание по вероубеждению",
-                                    style = MaterialTheme.typography.labelLarge,
+                                    fontSize = dictionaryTranslationSp.sp,
                                     color = MaterialTheme.colorScheme.onSecondaryContainer)
                                 Spacer(Modifier.height(5.dp))
-                                Text(note, style = MaterialTheme.typography.bodySmall,
+                                Text(note, fontSize = dictionaryTranslationSp.sp,
+                                    lineHeight = (dictionaryTranslationSp * 1.4f).sp,
                                     color = MaterialTheme.colorScheme.onSecondaryContainer)
                             }
                         }
@@ -508,7 +551,6 @@ private fun AyahWordDictionary(surah: Int, ayah: Int, words: List<WordByWordStor
         }
     }
 }
-
 @Composable
 private fun AyahAudioControls(
     surah: Int,
@@ -535,7 +577,6 @@ private fun AyahAudioControls(
     val position = playback.positionMs
     val shownFraction = if (dragging) fraction else if (isCurrent && duration > 0)
         (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
-
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         IconButton(onClick = onPlay, enabled = reciters.isNotEmpty()) {
             Icon(if (isCurrent && playback.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -593,7 +634,6 @@ private fun AyahAudioControls(
         }
     }
 }
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsPanel(
@@ -686,10 +726,16 @@ fun SettingsPanel(
                 prefs.hadrSeekIntervalSeconds = intervalSeconds
             }, enabled = newSeconds in 1L..86400L) { Text("OK") }
         }
+        // The controls are intentionally right AFTER the audio seek interval.
+        HorizontalDivider()
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val tafsirDisplay = remember(context.applicationContext) {
+            SharedTafsirDisplayOptions.get(context.applicationContext)
+        }
+        TafsirDisplaySettingsSection(tafsirDisplay)
         Spacer(Modifier.height(20.dp))
     }
 }
-
 @Composable
 private fun SettingsSwitch(label: String, enabled: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -697,8 +743,7 @@ private fun SettingsSwitch(label: String, enabled: Boolean, onChange: (Boolean) 
         Switch(checked = enabled, onCheckedChange = onChange)
     }
 }
-
-/** No animation and no scroll-to-current on re-opening a sheet. */
+/** Persist a reader viewport. Audio uses its own active-item positioning. */
 @Composable
 private fun PersistLazyViewport(state: LazyListState, prefs: UserPreferences, key: String) {
     LaunchedEffect(state, key) {
@@ -715,7 +760,6 @@ private fun PersistLazyViewport(state: LazyListState, prefs: UserPreferences, ke
         }
     }
 }
-
 @Composable
 private fun PersistSettingsViewport(state: androidx.compose.foundation.ScrollState, prefs: UserPreferences) {
     LaunchedEffect(state) {
@@ -730,7 +774,6 @@ private fun PersistSettingsViewport(state: androidx.compose.foundation.ScrollSta
         onDispose { prefs.savePanelViewport("settings", 0, state.value) }
     }
 }
-
 /** Russian 1 слово, 2 слова, 5 слов, 11 слов, 21 слово, 22 слова. */
 internal fun russianWordCount(count: Int): String {
     val lastTwo = count % 100
