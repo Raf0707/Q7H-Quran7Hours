@@ -207,6 +207,46 @@ private object Q7HNightQpcFontCache {
     }
 }
 
+
+/**
+ * Adds real measured horizontal space around a QPC rubʿ al-hizb ornament.
+ * Markers are identified in OriginalQpcTafsirRepository from the source JSON
+ * word metadata ("۞ ..."), so each page can use its OWN glyph code safely.
+ * ReplacementSpan is used because leading RTL spaces can be swallowed by
+ * Android TextView and ordinary Unicode stars don't match QPC glyph codes.
+ */
+private class Q7HRubStarSidePaddingSpan(
+    private val sidePaddingPx: Float,
+    private val qpcTypeface: Typeface
+) : android.text.style.ReplacementSpan() {
+    override fun getSize(
+        paint: Paint,
+        text: CharSequence,
+        start: Int,
+        end: Int,
+        fm: Paint.FontMetricsInt?
+    ): Int {
+        val glyphPaint = Paint(paint).apply { typeface = qpcTypeface }
+        return ceil(glyphPaint.measureText(text, start, end) + sidePaddingPx * 2f).toInt()
+    }
+
+    override fun draw(
+        canvas: android.graphics.Canvas,
+        text: CharSequence,
+        start: Int,
+        end: Int,
+        x: Float,
+        top: Int,
+        y: Int,
+        bottom: Int,
+        paint: Paint
+    ) {
+        // Draw the genuine colored QPC glyph with its original Typeface/CPAL.
+        val glyphPaint = Paint(paint).apply { typeface = qpcTypeface }
+        canvas.drawText(text, start, end, x + sidePaddingPx, y.toFloat(), glyphPaint)
+    }
+}
+
 private object AdjustableQpcFonts {
     private val fonts = object : LinkedHashMap<String, Typeface>(36, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Typeface>?): Boolean = size > 24
@@ -306,8 +346,25 @@ internal fun Q7HAdjustableOriginalQpcText(
                     parts.forEachIndexed { index, part ->
                         if (index > 0) builder.append(' ')
                         val firstChar = builder.length
+                        // The source QPC glyph stream is never modified.
                         builder.append(part.glyphs)
                         val font = fonts[index]!!
+                        // Offset metadata comes from the readable "۞" in the
+                        // matching page layout JSON, not from the ambiguous PUA.
+                        // Works on ALL QPC pages, not only 36:28 or 40:41.
+                        for (offset in part.rubStarOffsets.distinct()) {
+                            if (offset !in part.glyphs.indices ||
+                                part.glyphs[offset].isWhitespace()) continue
+                            val glyphAt = firstChar + offset
+                            builder.setSpan(
+                                Q7HRubStarSidePaddingSpan(
+                                    8f * view.resources.displayMetrics.density, font
+                                ),
+                                glyphAt, glyphAt + 1,
+                                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                            )
+                            Log.d("Q7HTafsirDisplay", "QPC rub star padded on font page ${part.page}, offset=$offset")
+                        }
                         // The first face is already assigned to the WHOLE TextView.
                         // Apply per-run overrides only when another page font is needed.
                         if (index > 0 && font !== fonts.first()) {

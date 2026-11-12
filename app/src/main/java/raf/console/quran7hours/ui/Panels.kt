@@ -416,10 +416,11 @@ fun TafsirPanel(
                 // Never treat it as a numbered ayah or offer audio/dictionary for ayah 0.
                 if (position == 0 || loadedVerses[position - 1].surah != verse.surah) {
                     introductions.firstOrNull { it.surah == verse.surah }?.let { intro ->
-                        if (display.showTranslation || display.showTafsir) {
-                            item(key = "surah_intro_${intro.surah}") {
-                                Q7HSurahIntroductionCard(intro, store, display)
-                            }
+                        // Surah names separate chapters even in audio-only mode.
+                        // Translation and explanation remain independently controlled
+                        // inside the introduction card.
+                        item(key = "surah_intro_${intro.surah}") {
+                            Q7HSurahIntroductionCard(intro, store, display)
                         }
                     }
                 }
@@ -561,7 +562,9 @@ private fun Q7HSurahIntroductionCard(
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.primary
             )
-            if (intro.translation.isNotBlank()) Q7HFootnoteText(
+            // Only the name is immutable. Hide the translated title if the
+            // user disabled translations, including in audio-only mode.
+            if (display.showTranslation && intro.translation.isNotBlank()) Q7HFootnoteText(
                 intro.translation, q7hFootnotes, "intro-translation",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant

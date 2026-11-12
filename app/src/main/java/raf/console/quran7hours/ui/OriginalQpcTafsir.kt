@@ -35,7 +35,12 @@ import kotlin.math.max
 import kotlin.math.min
 
 /** One run of word-glyphs using the QPC font of the physical Mushaf page. */
-internal data class OriginalQpcPart(val page: Int, val glyphs: String)
+/** Physical glyph offsets of rubʿ al-hizb stars (۞) in this font run. */
+internal data class OriginalQpcPart(
+    val page: Int,
+    val glyphs: String,
+    val rubStarOffsets: List<Int> = emptyList()
+)
 internal data class OriginalQpcAyah(val parts: List<OriginalQpcPart>)
 
 private const val QPC_ROOT = "quran/qpc-v4"
@@ -49,7 +54,8 @@ private data class OriginalQpcWord(
     val wordNumber: Int,
     val word: String,
     val glyphs: String,
-    val page: Int
+    val page: Int,
+    val rubStarAtStart: Boolean = false
 )
 
 /**
@@ -152,6 +158,35 @@ internal class OriginalQpcTafsirRepository(context: Context) {
                     continue
                 }
             }
+            // Some verses that start at a page boundary in the old/classic
+            // Mushaf layout share QCF codes with the *previous* QCF V2/V4
+            // font page. The layout JSON remains the source of the words;
+            // only the Typeface page is overridden after exact verification.
+            // Each QCF page reuses the same Unicode private-use codepoints:
+            // never choose a font merely because it contains a codepoint.
+            val rahmanFontPage: Int? = if (verse.surah == 55) {
+                val glyphs = canonicalWords.map { it.glyphs }
+                val expected: List<String>? = when (verse.ayah) {
+                    // page-533.json -> p532.ttf (55:41)
+                    41 -> listOf("\uFCD0", "\uFCD1", "\uFCD2", "\uFCD3", "\uFCD4", "\uFCD5 \uFCD6")
+                    // page-534.json -> p533.ttf (55:68 and 55:69)
+                    68 -> listOf("\uFCCB", "\uFCCC", "\uFCCD", "\uFCCE \uFCCF")
+                    69 -> listOf("\uFCD0", "\uFCD1", "\uFCD2", "\uFCD3 \uFCD4")
+                    else -> null
+                }
+                if (expected == null) null else {
+                    val sourcePage = if (verse.ayah == 41) 533 else 534
+                    if (canonicalWords.all { it.page == sourcePage } && glyphs == expected) {
+                        sourcePage - 1
+                    } else {
+                        // Never render these glyphs with an unrelated QCF page.
+                        Log.e(LOG_TAG, "55:${verse.ayah}: unexpected boundary glyphs; " +
+                            "sourcePages=${canonicalWords.map { it.page }.distinct()}, " +
+                            "wordCount=${glyphs.size}; Unicode fallback")
+                        continue
+                    }
+                }
+            } else null
             val words: List<OriginalQpcWord> = if (verse.surah == 1 && verse.ayah in 6..7) {
                 // Explicit Hanafi 1:6 = four words, 1:7 = five words.
                 if (canonicalWords.size != 9 ||
@@ -173,18 +208,43 @@ internal class OriginalQpcTafsirRepository(context: Context) {
                 if (word.glyphs.isBlank()) continue
                 // Source: classic layout page-121.json; QCF font: p120.ttf.
                 // Other verses keep their existing source-page/font mapping.
-                val fontPage = if (verse.surah == 5 && verse.ayah == 77) 120 else word.page
+                val fontPage = when {
+                    verse.surah == 5 && verse.ayah == 77 -> 120
+                    rahmanFontPage != null -> rahmanFontPage
+                    else -> word.page
+                }
+                // In the source layout, the star is identified by the readable
+                // word text "۞ ...", NOT by a fixed QPC character code. Every
+                // page reuses U+FC41, so relying on its code would also pad
+                // ordinary words on hundreds of unrelated pages.
+                val starInWord = if (word.rubStarAtStart)
+                    word.glyphs.indexOfFirst { !it.isWhitespace() } else -1
                 val previous = parts.lastOrNull()
                 if (previous != null && previous.page == fontPage) {
-                    parts[parts.lastIndex] = previous.copy(glyphs = previous.glyphs + " " + word.glyphs)
+                    val starOffset = if (starInWord >= 0)
+                        previous.glyphs.length + 1 + starInWord else -1
+                    parts[parts.lastIndex] = previous.copy(
+                        glyphs = previous.glyphs + " " + word.glyphs,
+                        rubStarOffsets = if (starOffset >= 0)
+                            previous.rubStarOffsets + starOffset
+                        else previous.rubStarOffsets
+                    )
                 } else {
-                    parts.add(OriginalQpcPart(fontPage, word.glyphs))
+                    parts.add(OriginalQpcPart(
+                        fontPage, word.glyphs,
+                        if (starInWord >= 0) listOf(starInWord) else emptyList()
+                    ))
                 }
             }
             if (parts.isNotEmpty()) {
                 if (verse.surah == 5 && verse.ayah == 77) {
                     Log.i(LOG_TAG, "5:77: source=page-121.json, font=p120.ttf, " +
                         "sourceWords=${words.size}, QCF glyphs=${parts.sumOf { it.glyphs.length }}")
+                }
+                if (rahmanFontPage != null) {
+                    Log.i(LOG_TAG, "55:${verse.ayah}: QPC layout page=" +
+                        "${canonicalWords.first().page}, QCF font=p$rahmanFontPage.ttf " +
+                        "(${if (rahmanFontPage == 532) "55:41" else "55:68/69"})")
                 }
                 result[key] = OriginalQpcAyah(parts)
             }
@@ -234,7 +294,14 @@ internal class OriginalQpcTafsirRepository(context: Context) {
                             val w = loc[2].toIntOrNull() ?: continue
                             val glyphs = entry.optString("qpcV2")
                             if (s !in 1..114 || a < 1 || w < 1 || glyphs.isBlank()) continue
-                            add(OriginalQpcWord(s, a, w, entry.optString("word"), glyphs, page))
+                            val readableWord = entry.optString("word")
+                            // Quranic rubʿ al-hizb ornament is a separate glyph
+                            // before the word. The Unicode marker occurs only in
+                            // layout metadata; the actual font glyph is PUA.
+                            val hasRubStar = readableWord.trimStart().startsWith("۞")
+                            add(OriginalQpcWord(
+                                s, a, w, readableWord, glyphs, page, hasRubStar
+                            ))
                         }
                     }
                 }

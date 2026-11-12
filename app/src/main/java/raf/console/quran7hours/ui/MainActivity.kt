@@ -411,7 +411,7 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                 scope.launch { drawerState.close() }
                             }
                         )
-                        DrawerSection.BOOKMARKS -> LearningBookmarksDrawer(
+                        DrawerSection.BOOKMARKS -> LearningBookmarksDetailedDrawer(
                             bookmarks = bookmarks,
                             onOpen = { goToPage(it); scope.launch { drawerState.close() } },
                             onRemove = { id ->
