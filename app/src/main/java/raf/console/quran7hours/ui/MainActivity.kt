@@ -887,6 +887,7 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                     )
                     SheetSection.HAFIZ -> HafizDiaryPanel(
                         page = page, tafsir = tafsir, prefs = prefs, db = learningDb,
+                        tajweed = tajweed,
                         onPrevious = { goToPage(page - 1) },
                         onNext = { goToPage(page + 1) }
                     )

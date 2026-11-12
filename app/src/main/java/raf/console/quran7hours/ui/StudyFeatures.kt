@@ -436,10 +436,17 @@ internal fun HafizDiaryPanel(
     tafsir: TafsirStore,
     prefs: UserPreferences,
     db: LearningDatabase,
+    tajweed: Boolean,
     onPrevious: () -> Unit,
     onNext: () -> Unit
 ) {
-    val verses by produceState<List<TafsirStore.Verse>?>(null, page) { value = tafsir.page(page) }
+    // Q7H_HAFIZ_QPC_DIARY_20261112_V1
+    // One shared TafsirStore source and atomic QPC glyph/font preparation.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prepared by produceState<QpcPreparedPage?>(null, page, tafsir) {
+        value = QpcPreparedPages.page(context, tafsir, page)
+    }
+    val verses = prepared?.verses
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val backgroundTap = remember { MutableInteractionSource() }
@@ -477,7 +484,7 @@ internal fun HafizDiaryPanel(
             LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 30.dp),
             verticalArrangement = Arrangement.spacedBy(9.dp)) {
             items(loaded, key = { "${it.surah}:${it.ayah}" }) { verse ->
-                HafizVerseCard(verse, db)
+                HafizVerseCard(verse, db, prepared?.qpc?.get(verse.surah to verse.ayah), tajweed)
             }
             }
         }
@@ -485,7 +492,12 @@ internal fun HafizDiaryPanel(
 }
 
 @Composable
-private fun HafizVerseCard(verse: TafsirStore.Verse, db: LearningDatabase) {
+private fun HafizVerseCard(
+    verse: TafsirStore.Verse,
+    db: LearningDatabase,
+    qpc: OriginalQpcAyah?,
+    tajweed: Boolean
+) {
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val backgroundTap = remember { MutableInteractionSource() }
@@ -496,9 +508,13 @@ private fun HafizVerseCard(verse: TafsirStore.Verse, db: LearningDatabase) {
         }.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("${verse.surah}:${verse.ayah}", style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary)
-            Text(verse.arabic, fontSize = 25.sp, lineHeight = 40.sp,
-                modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Right,
-                style = TextStyle(textDirection = TextDirection.Rtl))
+            if (qpc != null) {
+                // Original page-specific QPC: V4 embedded Tajweed when ON, V2 when OFF.
+                OriginalQpcTafsirText(qpc, tajweed)
+            } else {
+                // Preserve readable Azan Arabic; never display QPC PUA codes without fonts.
+                TafsirQuranText(arabicFromAzan = verse.arabic, verified = null, tajweed = false)
+            }
             if (verse.translation.isNotBlank()) Text(verse.translation,
                 style = MaterialTheme.typography.bodyMedium)
             OutlinedTextField(value = note, onValueChange = { next ->
