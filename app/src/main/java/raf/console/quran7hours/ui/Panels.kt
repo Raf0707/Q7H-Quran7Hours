@@ -49,6 +49,8 @@ import raf.console.quran7hours.data.TafsirStore
 import raf.console.quran7hours.data.WordByWordStore
 import raf.console.quran7hours.data.UserPreferences
 import raf.console.quran7hours.data.AqidahVerseNotes
+import raf.console.quran7hours.data.Q7HAqidahDictionaryNotes
+import raf.console.quran7hours.data.QuranV4PageCatalog
 import raf.console.quran7hours.data.TimingCatalog
 import raf.console.quran7hours.media.AyahEndMode
 import raf.console.quran7hours.media.Reciter
@@ -88,7 +90,9 @@ fun AudioPanel(
     // ACTIVE NUMBER changes, not on every position update.
     val marks = remember(category, timings) { timings.marks(category) }
     val timedActive = if (playback.mediaId == "hadr") timings.at(category, playback.positionMs) else null
-    val active = timedActive ?: QuranCatalog.segmentForPage(category, currentPage)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val v4Navigation = remember(context.applicationContext) { QuranV4PageCatalog(context.applicationContext) }
+    val active = timedActive ?: v4Navigation.segmentForPage(category, currentPage)
     val initialIndex = marks.indexOfFirst { it.number == active }.coerceAtLeast(0)
     val listState = remember(category) { LazyListState(initialIndex, 0) }
     LaunchedEffect(category, active) {
@@ -619,7 +623,7 @@ private fun AyahWordDictionary(
 ) {
     var expanded by remember(surah, ayah, initiallyExpanded) { mutableStateOf(initiallyExpanded) }
     val dictionaryTranslationSp = (fontSizeSp - 4f).coerceAtLeast(10f)
-    val note = remember(surah, ayah) { AqidahVerseNotes.note(surah, ayah) }
+    val note = remember(surah, ayah) { Q7HAqidahDictionaryNotes.note(surah, ayah) ?: AqidahVerseNotes.note(surah, ayah) }
     OutlinedCard(shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth()) {
             Row(

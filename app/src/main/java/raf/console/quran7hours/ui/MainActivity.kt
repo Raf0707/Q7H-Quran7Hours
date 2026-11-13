@@ -111,6 +111,7 @@ private fun Quran7HoursScreen(activity: MainActivity) {
     val mushaf = remember { MushafStore(context) }
     val learningDb = remember { LearningDatabase(context).also { it.migrateLegacyBookmarks() } }
     val catalogDetails = remember { CatalogDetails(context) }
+    val v4Navigation = remember(context.applicationContext) { QuranV4PageCatalog(context.applicationContext) }
     val tafsir = remember { TafsirStore(context) }
     val quranScript = remember { TafsirQuranScript(context) }
     val wordStore = remember { WordByWordStore(context) }
@@ -403,7 +404,7 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                             segment = drawerSegment, onSegment = { drawerSegment = it }, currentPage = page,
                             highlightedSurah = playingSurah, descriptions = catalogDetails,
                             onClick = { segment, index ->
-                                goToPage(QuranCatalog.startPages(segment).getOrNull(index - 1) ?: 1)
+                                goToPage(v4Navigation.startPages(segment).getOrNull(index - 1) ?: 1)
                                 scope.launch { drawerState.close() }
                             },
                             onJumpAyah = { surah, ayah ->
@@ -435,10 +436,10 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                 } else {
                                     val target = when (note.scope) {
                                         NoteScope.PAGE -> note.number
-                                        NoteScope.SURAH -> QuranCatalog.surahPages.getOrNull(note.number - 1)
-                                        NoteScope.JUZ -> QuranCatalog.juzPages.getOrNull(note.number - 1)
-                                        NoteScope.HIZB -> QuranCatalog.hizbPages.getOrNull(note.number - 1)
-                                        NoteScope.MANZIL -> QuranCatalog.manzilPages.getOrNull(note.number - 1)
+                                        NoteScope.SURAH -> v4Navigation.startPages(QuranCatalog.Segment.SURAH).getOrNull(note.number - 1)
+                                        NoteScope.JUZ -> v4Navigation.startPages(QuranCatalog.Segment.JUZ).getOrNull(note.number - 1)
+                                        NoteScope.HIZB -> v4Navigation.startPages(QuranCatalog.Segment.HIZB).getOrNull(note.number - 1)
+                                        NoteScope.MANZIL -> v4Navigation.startPages(QuranCatalog.Segment.MANZIL).getOrNull(note.number - 1)
                                         else -> bookmarks.firstOrNull { it.id == note.bookmarkId }?.page
                                     }
                                     if (target != null) goToPage(target)

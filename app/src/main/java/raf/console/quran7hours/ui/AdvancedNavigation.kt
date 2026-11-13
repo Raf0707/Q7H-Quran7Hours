@@ -112,7 +112,7 @@ private fun NavigationNodes(
     selectedNumber: Int = 0
 ) {
     val starts by produceState<List<Ref>>(emptyList(), pages) {
-        value = QuranCatalog.manzilPages.toList().mapNotNull { p -> pages.first(p) }
+        value = pages.v4.manzilStartRefs()
     }
     val roots = remember(kind, starts) {
         if (kind == NavKind.MANZIL && starts.size != 7) emptyList()
@@ -253,11 +253,11 @@ internal fun NavigationContent(
         QuranCatalog.Segment.MANZIL -> NavKind.MANZIL
     }
     val selected = when (kind) {
-        NavKind.SURAH -> highlightedSurah ?: QuranCatalog.segmentForPage(QuranCatalog.Segment.SURAH,currentPage)
+        NavKind.SURAH -> highlightedSurah ?: pages.v4.segmentForPage(QuranCatalog.Segment.SURAH,currentPage)
         NavKind.PAGE -> currentPage
-        NavKind.JUZ -> QuranCatalog.segmentForPage(QuranCatalog.Segment.JUZ,currentPage)
-        NavKind.HIZB -> QuranCatalog.segmentForPage(QuranCatalog.Segment.HIZB,currentPage)
-        NavKind.MANZIL -> QuranCatalog.segmentForPage(QuranCatalog.Segment.MANZIL,currentPage)
+        NavKind.JUZ -> pages.v4.segmentForPage(QuranCatalog.Segment.JUZ,currentPage)
+        NavKind.HIZB -> pages.v4.segmentForPage(QuranCatalog.Segment.HIZB,currentPage)
+        NavKind.MANZIL -> pages.v4.segmentForPage(QuranCatalog.Segment.MANZIL,currentPage)
         NavKind.HALF -> 0
     }
     Column(Modifier.fillMaxSize()) {
@@ -309,7 +309,7 @@ internal fun PageJumpDialog(
     val pages=remember(context.applicationContext){QuranNavigationPageSource(context.applicationContext)}
     var mode by rememberSaveable { mutableStateOf("page") }
     var input by rememberSaveable(initialPage){mutableStateOf(initialPage.toString())}
-    var surah by rememberSaveable(initialPage){mutableIntStateOf(QuranCatalog.segmentForPage(QuranCatalog.Segment.SURAH,initialPage))}
+    var surah by rememberSaveable(initialPage){mutableIntStateOf(pages.v4.segmentForPage(QuranCatalog.Segment.SURAH,initialPage))}
     var ayah by rememberSaveable(initialPage) { mutableIntStateOf(1) }
     var explicitlySelected by rememberSaveable(initialPage) { mutableStateOf(false) }
     // Navigation page source uses the actual Azan.ru verses on this physical page.
@@ -360,7 +360,7 @@ internal fun PageJumpDialog(
                         val selectedPosition = QuranNavigationIndex.position(Ref(surah,ayah))
                         Text("Выбранный аят: Джуз ${selectedPosition.juz}, ${selectedPosition.juzQuarter}/4 · " +
                             "Хизб ${selectedPosition.hizb}, ${selectedPosition.hizbHalf}/2" +
-                            (ayahPage?.let { " · Манзиль ${QuranCatalog.segmentForPage(QuranCatalog.Segment.MANZIL,it)}" } ?: ""),
+                            (ayahPage?.let { " · Манзиль ${pages.v4.segmentForPage(QuranCatalog.Segment.MANZIL,it)}" } ?: ""),
                             style=MaterialTheme.typography.bodySmall)
                         Text(preview,style=MaterialTheme.typography.bodySmall)
                     }
@@ -381,9 +381,9 @@ internal fun PageJumpDialog(
                         NavigationNodes(kind,mode,initialPage,pages,onGo,onGoAyah,
                             modifier=Modifier.height(340.dp),
                             selectedNumber=when(kind){
-                                NavKind.JUZ->QuranCatalog.segmentForPage(QuranCatalog.Segment.JUZ,initialPage)
-                                NavKind.HIZB->QuranCatalog.segmentForPage(QuranCatalog.Segment.HIZB,initialPage)
-                                else->QuranCatalog.segmentForPage(QuranCatalog.Segment.MANZIL,initialPage)
+                                NavKind.JUZ->pages.v4.segmentForPage(QuranCatalog.Segment.JUZ,initialPage)
+                                NavKind.HIZB->pages.v4.segmentForPage(QuranCatalog.Segment.HIZB,initialPage)
+                                else->pages.v4.segmentForPage(QuranCatalog.Segment.MANZIL,initialPage)
                             })
                     }
                 }

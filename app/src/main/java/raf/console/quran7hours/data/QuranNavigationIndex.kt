@@ -78,20 +78,19 @@ object QuranNavigationIndex {
 
 /** Per-page Quran details come from the same Azan.ru files as the Tafsir, not stale Java switches. */
 class QuranNavigationPageSource(context: Context) {
-    private val tafsir = TafsirStore(context.applicationContext)
+    internal val v4 = QuranV4PageCatalog(context.applicationContext)
     private val cache = ConcurrentHashMap<Int, List<QuranNavigationIndex.Ref>>()
     private val ayahPageCache = ConcurrentHashMap<QuranNavigationIndex.Ref,Int>()
     suspend fun verses(page: Int): List<QuranNavigationIndex.Ref> {
         if (page !in 1..604) return emptyList()
         cache[page]?.let { return it }
-        val value = tafsir.page(page).asSequence().map { QuranNavigationIndex.Ref(it.surah, it.ayah) }
-            .filter { QuranCatalog.isValidAyah(it.surah,it.ayah) }.distinct().toList()
+        val value = v4.verses(page)
         cache.putIfAbsent(page, value)
         return cache[page].orEmpty()
     }
     suspend fun pageOf(ref: QuranNavigationIndex.Ref): Int? {
         ayahPageCache[ref]?.let { return it }
-        val resolved = tafsir.findPageForAyah(ref.surah, ref.ayah)
+        val resolved = v4.pageOf(ref.surah, ref.ayah)
         if (resolved != null) ayahPageCache.putIfAbsent(ref,resolved)
         return resolved
     }
@@ -112,7 +111,7 @@ class QuranNavigationPageSource(context: Context) {
         if (page !in 1..604) return ""
         val first = first(page) ?: return "Нет сведений об аятах"
         val sections = verses(page).map(QuranNavigationIndex::position).distinct()
-        val manzil = QuranCatalog.segmentForPage(QuranCatalog.Segment.MANZIL, page)
+        val manzil = v4.segmentForPage(QuranCatalog.Segment.MANZIL, page)
         val main = pageDescription(page)
         val sajda = pageSajdas(page)
         return buildString {

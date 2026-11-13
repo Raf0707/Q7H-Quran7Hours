@@ -2,80 +2,8 @@
   "page": 533,
   "url": "https://av.quranacademy.org/quran/mushaf/533",
   "method": "playwright",
-  "count": 117,
+  "count": 119,
   "words": [
-    {
-      "page": 533,
-      "surah": 55,
-      "ayah": 41,
-      "position": 1,
-      "location": "55:41:1",
-      "line": 1,
-      "arabic": "يُعْرَفُ",
-      "kind": "word",
-      "index_on_page": 1,
-      "translation": "Будут узнаны"
-    },
-    {
-      "page": 533,
-      "surah": 55,
-      "ayah": 41,
-      "position": 2,
-      "location": "55:41:2",
-      "line": 1,
-      "arabic": "ٱلْمُجْرِمُونَ",
-      "kind": "word",
-      "index_on_page": 2,
-      "translation": "беззаконники"
-    },
-    {
-      "page": 533,
-      "surah": 55,
-      "ayah": 41,
-      "position": 3,
-      "location": "55:41:3",
-      "line": 1,
-      "arabic": "بِسِيمَـٰهُمْ",
-      "kind": "word",
-      "index_on_page": 3,
-      "translation": "по их признакам,"
-    },
-    {
-      "page": 533,
-      "surah": 55,
-      "ayah": 41,
-      "position": 4,
-      "location": "55:41:4",
-      "line": 1,
-      "arabic": "فَيُؤْخَذُ",
-      "kind": "word",
-      "index_on_page": 4,
-      "translation": "и будут схвачены"
-    },
-    {
-      "page": 533,
-      "surah": 55,
-      "ayah": 41,
-      "position": 5,
-      "location": "55:41:5",
-      "line": 1,
-      "arabic": "بِٱلنَّوَٰصِى",
-      "kind": "word",
-      "index_on_page": 5,
-      "translation": "за хохлы"
-    },
-    {
-      "page": 533,
-      "surah": 55,
-      "ayah": 41,
-      "position": 6,
-      "location": "55:41:6",
-      "line": 1,
-      "arabic": "وَٱلْأَقْدَامِ",
-      "kind": "word",
-      "index_on_page": 6,
-      "translation": "и ноги."
-    },
     {
       "page": 533,
       "surah": 55,
@@ -85,7 +13,7 @@
       "line": 1,
       "arabic": "فَبِأَىِّ",
       "kind": "word",
-      "index_on_page": 7,
+      "index_on_page": 1,
       "translation": "Какое же"
     },
     {
@@ -94,10 +22,10 @@
       "ayah": 42,
       "position": 2,
       "location": "55:42:2",
-      "line": 2,
+      "line": 1,
       "arabic": "ءَالَآءِ",
       "kind": "word",
-      "index_on_page": 8,
+      "index_on_page": 2,
       "translation": "из благодеяний"
     },
     {
@@ -106,10 +34,10 @@
       "ayah": 42,
       "position": 3,
       "location": "55:42:3",
-      "line": 2,
+      "line": 1,
       "arabic": "رَبِّكُمَا",
       "kind": "word",
-      "index_on_page": 9,
+      "index_on_page": 3,
       "translation": "Господа вашего (двоих)"
     },
     {
@@ -118,10 +46,10 @@
       "ayah": 42,
       "position": 4,
       "location": "55:42:4",
-      "line": 2,
+      "line": 1,
       "arabic": "تُكَذِّبَانِ",
       "kind": "word",
-      "index_on_page": 10,
+      "index_on_page": 4,
       "translation": "вы (двое) сочтёте ложным?"
     },
     {
@@ -130,10 +58,10 @@
       "ayah": 43,
       "position": 1,
       "location": "55:43:1",
-      "line": 2,
+      "line": 1,
       "arabic": "هَـٰذِهِۦ",
       "kind": "word",
-      "index_on_page": 11,
+      "index_on_page": 5,
       "translation": "«Это –"
     },
     {
@@ -142,10 +70,10 @@
       "ayah": 43,
       "position": 2,
       "location": "55:43:2",
-      "line": 2,
+      "line": 1,
       "arabic": "جَهَنَّمُ",
       "kind": "word",
-      "index_on_page": 12,
+      "index_on_page": 6,
       "translation": "Геенна,"
     },
     {
@@ -154,10 +82,10 @@
       "ayah": 43,
       "position": 3,
       "location": "55:43:3",
-      "line": 2,
+      "line": 1,
       "arabic": "ٱلَّتِى",
       "kind": "word",
-      "index_on_page": 13,
+      "index_on_page": 7,
       "translation": "которую"
     },
     {
@@ -166,10 +94,10 @@
       "ayah": 43,
       "position": 4,
       "location": "55:43:4",
-      "line": 2,
+      "line": 1,
       "arabic": "يُكَذِّبُ",
       "kind": "word",
-      "index_on_page": 14,
+      "index_on_page": 8,
       "translation": "считали ложью"
     },
     {
@@ -178,10 +106,10 @@
       "ayah": 43,
       "position": 5,
       "location": "55:43:5",
-      "line": 2,
+      "line": 1,
       "arabic": "بِهَا",
       "kind": "word",
-      "index_on_page": 15,
+      "index_on_page": 9,
       "translation": "её"
     },
     {
@@ -193,7 +121,7 @@
       "line": 2,
       "arabic": "ٱلْمُجْرِمُونَ",
       "kind": "word",
-      "index_on_page": 16,
+      "index_on_page": 10,
       "translation": "беззаконники."
     },
     {
@@ -202,10 +130,10 @@
       "ayah": 44,
       "position": 1,
       "location": "55:44:1",
-      "line": 3,
+      "line": 2,
       "arabic": "يَطُوفُونَ",
       "kind": "word",
-      "index_on_page": 17,
+      "index_on_page": 11,
       "translation": "Будут они ходить"
     },
     {
@@ -214,10 +142,10 @@
       "ayah": 44,
       "position": 2,
       "location": "55:44:2",
-      "line": 3,
+      "line": 2,
       "arabic": "بَيْنَهَا",
       "kind": "word",
-      "index_on_page": 18,
+      "index_on_page": 12,
       "translation": "между ней"
     },
     {
@@ -226,10 +154,10 @@
       "ayah": 44,
       "position": 3,
       "location": "55:44:3",
-      "line": 3,
+      "line": 2,
       "arabic": "وَبَيْنَ",
       "kind": "word",
-      "index_on_page": 19,
+      "index_on_page": 13,
       "translation": "и"
     },
     {
@@ -238,10 +166,10 @@
       "ayah": 44,
       "position": 4,
       "location": "55:44:4",
-      "line": 3,
+      "line": 2,
       "arabic": "حَمِيمٍ",
       "kind": "word",
-      "index_on_page": 20,
+      "index_on_page": 14,
       "translation": "кипятком"
     },
     {
@@ -250,10 +178,10 @@
       "ayah": 44,
       "position": 5,
       "location": "55:44:5",
-      "line": 3,
+      "line": 2,
       "arabic": "ءَانٍۢ",
       "kind": "word",
-      "index_on_page": 21,
+      "index_on_page": 15,
       "translation": "обжигающим"
     },
     {
@@ -262,10 +190,10 @@
       "ayah": 45,
       "position": 1,
       "location": "55:45:1",
-      "line": 3,
+      "line": 2,
       "arabic": "فَبِأَىِّ",
       "kind": "word",
-      "index_on_page": 22,
+      "index_on_page": 16,
       "translation": "Какое же"
     },
     {
@@ -274,10 +202,10 @@
       "ayah": 45,
       "position": 2,
       "location": "55:45:2",
-      "line": 3,
+      "line": 2,
       "arabic": "ءَالَآءِ",
       "kind": "word",
-      "index_on_page": 23,
+      "index_on_page": 17,
       "translation": "из благодеяний"
     },
     {
@@ -289,7 +217,7 @@
       "line": 3,
       "arabic": "رَبِّكُمَا",
       "kind": "word",
-      "index_on_page": 24,
+      "index_on_page": 18,
       "translation": "Господа вашего (двоих)"
     },
     {
@@ -301,7 +229,7 @@
       "line": 3,
       "arabic": "تُكَذِّبَانِ",
       "kind": "word",
-      "index_on_page": 25,
+      "index_on_page": 19,
       "translation": "вы (двое) сочтёте ложным?"
     },
     {
@@ -310,10 +238,10 @@
       "ayah": 46,
       "position": 1,
       "location": "55:46:1",
-      "line": 4,
+      "line": 3,
       "arabic": "وَلِمَنْ",
       "kind": "word",
-      "index_on_page": 26,
+      "index_on_page": 20,
       "translation": "А тому, кто"
     },
     {
@@ -322,10 +250,10 @@
       "ayah": 46,
       "position": 2,
       "location": "55:46:2",
-      "line": 4,
+      "line": 3,
       "arabic": "خَافَ",
       "kind": "word",
-      "index_on_page": 27,
+      "index_on_page": 21,
       "translation": "боялся"
     },
     {
@@ -334,10 +262,10 @@
       "ayah": 46,
       "position": 3,
       "location": "55:46:3",
-      "line": 4,
+      "line": 3,
       "arabic": "مَقَامَ",
       "kind": "word",
-      "index_on_page": 28,
+      "index_on_page": 22,
       "translation": "стояния"
     },
     {
@@ -346,10 +274,10 @@
       "ayah": 46,
       "position": 4,
       "location": "55:46:4",
-      "line": 4,
+      "line": 3,
       "arabic": "رَبِّهِۦ",
       "kind": "word",
-      "index_on_page": 29,
+      "index_on_page": 23,
       "translation": "перед своим Господом"
     },
     {
@@ -358,10 +286,10 @@
       "ayah": 46,
       "position": 5,
       "location": "55:46:5",
-      "line": 4,
+      "line": 3,
       "arabic": "جَنَّتَانِ",
       "kind": "word",
-      "index_on_page": 30,
+      "index_on_page": 24,
       "translation": "два сада, –"
     },
     {
@@ -370,10 +298,10 @@
       "ayah": 47,
       "position": 1,
       "location": "55:47:1",
-      "line": 4,
+      "line": 3,
       "arabic": "فَبِأَىِّ",
       "kind": "word",
-      "index_on_page": 31,
+      "index_on_page": 25,
       "translation": "Какое же"
     },
     {
@@ -382,10 +310,10 @@
       "ayah": 47,
       "position": 2,
       "location": "55:47:2",
-      "line": 4,
+      "line": 3,
       "arabic": "ءَالَآءِ",
       "kind": "word",
-      "index_on_page": 32,
+      "index_on_page": 26,
       "translation": "из благодеяний"
     },
     {
@@ -397,7 +325,7 @@
       "line": 4,
       "arabic": "رَبِّكُمَا",
       "kind": "word",
-      "index_on_page": 33,
+      "index_on_page": 27,
       "translation": "Господа вашего (двоих)"
     },
     {
@@ -409,7 +337,7 @@
       "line": 4,
       "arabic": "تُكَذِّبَانِ",
       "kind": "word",
-      "index_on_page": 34,
+      "index_on_page": 28,
       "translation": "вы (двое) сочтёте ложным?"
     },
     {
@@ -418,10 +346,10 @@
       "ayah": 48,
       "position": 1,
       "location": "55:48:1",
-      "line": 5,
+      "line": 4,
       "arabic": "ذَوَاتَآ",
       "kind": "word",
-      "index_on_page": 35,
+      "index_on_page": 29,
       "translation": "обладающие"
     },
     {
@@ -430,10 +358,10 @@
       "ayah": 48,
       "position": 2,
       "location": "55:48:2",
-      "line": 5,
+      "line": 4,
       "arabic": "أَفْنَانٍۢ",
       "kind": "word",
-      "index_on_page": 36,
+      "index_on_page": 30,
       "translation": "ветвями"
     },
     {
@@ -442,10 +370,10 @@
       "ayah": 49,
       "position": 1,
       "location": "55:49:1",
-      "line": 5,
+      "line": 4,
       "arabic": "فَبِأَىِّ",
       "kind": "word",
-      "index_on_page": 37,
+      "index_on_page": 31,
       "translation": "Какое же"
     },
     {
@@ -454,10 +382,10 @@
       "ayah": 49,
       "position": 2,
       "location": "55:49:2",
-      "line": 5,
+      "line": 4,
       "arabic": "ءَالَآءِ",
       "kind": "word",
-      "index_on_page": 38,
+      "index_on_page": 32,
       "translation": "из благодеяний"
     },
     {
@@ -466,10 +394,10 @@
       "ayah": 49,
       "position": 3,
       "location": "55:49:3",
-      "line": 5,
+      "line": 4,
       "arabic": "رَبِّكُمَا",
       "kind": "word",
-      "index_on_page": 39,
+      "index_on_page": 33,
       "translation": "Господа вашего (двоих)"
     },
     {
@@ -478,10 +406,10 @@
       "ayah": 49,
       "position": 4,
       "location": "55:49:4",
-      "line": 5,
+      "line": 4,
       "arabic": "تُكَذِّبَانِ",
       "kind": "word",
-      "index_on_page": 40,
+      "index_on_page": 34,
       "translation": "вы (двое) сочтёте ложным?"
     },
     {
@@ -493,7 +421,7 @@
       "line": 5,
       "arabic": "فِيهِمَا",
       "kind": "word",
-      "index_on_page": 41,
+      "index_on_page": 35,
       "translation": "В них обоих"
     },
     {
@@ -505,7 +433,7 @@
       "line": 5,
       "arabic": "عَيْنَانِ",
       "kind": "word",
-      "index_on_page": 42,
+      "index_on_page": 36,
       "translation": "два источника"
     },
     {
@@ -514,10 +442,10 @@
       "ayah": 50,
       "position": 3,
       "location": "55:50:3",
-      "line": 6,
+      "line": 5,
       "arabic": "تَجْرِيَانِ",
       "kind": "word",
-      "index_on_page": 43,
+      "index_on_page": 37,
       "translation": "(которые) текут."
     },
     {
@@ -526,10 +454,10 @@
       "ayah": 51,
       "position": 1,
       "location": "55:51:1",
-      "line": 6,
+      "line": 5,
       "arabic": "فَبِأَىِّ",
       "kind": "word",
-      "index_on_page": 44,
+      "index_on_page": 38,
       "translation": "Какое же"
     },
     {
@@ -538,10 +466,10 @@
       "ayah": 51,
       "position": 2,
       "location": "55:51:2",
-      "line": 6,
+      "line": 5,
       "arabic": "ءَالَآءِ",
       "kind": "word",
-      "index_on_page": 45,
+      "index_on_page": 39,
       "translation": "из благодеяний"
     },
     {
@@ -550,10 +478,10 @@
       "ayah": 51,
       "position": 3,
       "location": "55:51:3",
-      "line": 6,
+      "line": 5,
       "arabic": "رَبِّكُمَا",
       "kind": "word",
-      "index_on_page": 46,
+      "index_on_page": 40,
       "translation": "Господа вашего (двоих)"
     },
     {
@@ -562,10 +490,10 @@
       "ayah": 51,
       "position": 4,
       "location": "55:51:4",
-      "line": 6,
+      "line": 5,
       "arabic": "تُكَذِّبَانِ",
       "kind": "word",
-      "index_on_page": 47,
+      "index_on_page": 41,
       "translation": "вы (двое) сочтёте ложным?"
     },
     {
@@ -574,10 +502,10 @@
       "ayah": 52,
       "position": 1,
       "location": "55:52:1",
-      "line": 6,
+      "line": 5,
       "arabic": "فِيهِمَا",
       "kind": "word",
-      "index_on_page": 48,
+      "index_on_page": 42,
       "translation": "В них обоих"
     },
     {
@@ -589,7 +517,7 @@
       "line": 6,
       "arabic": "مِن",
       "kind": "word",
-      "index_on_page": 49,
+      "index_on_page": 43,
       "translation": "из"
     },
     {
@@ -601,7 +529,7 @@
       "line": 6,
       "arabic": "كُلِّ",
       "kind": "word",
-      "index_on_page": 50,
+      "index_on_page": 44,
       "translation": "всех"
     },
     {
@@ -613,7 +541,7 @@
       "line": 6,
       "arabic": "فَـٰكِهَةٍۢ",
       "kind": "word",
-      "index_on_page": 51,
+      "index_on_page": 45,
       "translation": "плодов"
     },
     {
@@ -622,10 +550,10 @@
       "ayah": 52,
       "position": 5,
       "location": "55:52:5",
-      "line": 7,
+      "line": 6,
       "arabic": "زَوْجَانِ",
       "kind": "word",
-      "index_on_page": 52,
+      "index_on_page": 46,
       "translation": "по паре."
     },
     {
@@ -634,10 +562,10 @@
       "ayah": 53,
       "position": 1,
       "location": "55:53:1",
-      "line": 7,
+      "line": 6,
       "arabic": "فَبِأَىِّ",
       "kind": "word",
-      "index_on_page": 53,
+      "index_on_page": 47,
       "translation": "Какое же"
     },
     {
@@ -646,10 +574,10 @@
       "ayah": 53,
       "position": 2,
       "location": "55:53:2",
-      "line": 7,
+      "line": 6,
       "arabic": "ءَالَآءِ",
       "kind": "word",
-      "index_on_page": 54,
+      "index_on_page": 48,
       "translation": "из благодеяний"
     },
     {
@@ -658,10 +586,10 @@
       "ayah": 53,
       "position": 3,
       "location": "55:53:3",
-      "line": 7,
+      "line": 6,
       "arabic": "رَبِّكُمَا",
       "kind": "word",
-      "index_on_page": 55,
+      "index_on_page": 49,
       "translation": "Господа вашего (двоих)"
     },
     {
@@ -670,10 +598,10 @@
       "ayah": 53,
       "position": 4,
       "location": "55:53:4",
-      "line": 7,
+      "line": 6,
       "arabic": "تُكَذِّبَانِ",
       "kind": "word",
-      "index_on_page": 56,
+      "index_on_page": 50,
       "translation": "вы (двое) сочтёте ложным?"
     },
     {
@@ -682,10 +610,10 @@
       "ayah": 54,
       "position": 1,
       "location": "55:54:1",
-      "line": 7,
+      "line": 6,
       "arabic": "مُتَّكِـِٔينَ",
       "kind": "word",
-      "index_on_page": 57,
+      "index_on_page": 51,
       "translation": "облокотившись"
     },
     {
@@ -697,7 +625,7 @@
       "line": 7,
       "arabic": "عَلَىٰ",
       "kind": "word",
-      "index_on_page": 58,
+      "index_on_page": 52,
       "translation": "на"
     },
     {
@@ -709,7 +637,7 @@
       "line": 7,
       "arabic": "فُرُشٍۭ",
       "kind": "word",
-      "index_on_page": 59,
+      "index_on_page": 53,
       "translation": "ложах,"
     },
     {
@@ -718,10 +646,10 @@
       "ayah": 54,
       "position": 4,
       "location": "55:54:4",
-      "line": 8,
+      "line": 7,
       "arabic": "بَطَآئِنُهَا",
       "kind": "word",
-      "index_on_page": 60,
+      "index_on_page": 54,
       "translation": "подкладка которых"
     },
     {
@@ -730,10 +658,10 @@
       "ayah": 54,
       "position": 5,
       "location": "55:54:5",
-      "line": 8,
+      "line": 7,
       "arabic": "مِنْ",
       "kind": "word",
-      "index_on_page": 61,
+      "index_on_page": 55,
       "translation": "из"
     },
     {
@@ -742,10 +670,10 @@
       "ayah": 54,
       "position": 6,
       "location": "55:54:6",
-      "line": 8,
+      "line": 7,
       "arabic": "إِسْتَبْرَقٍۢ ۚ",
       "kind": "word",
-      "index_on_page": 62,
+      "index_on_page": 56,
       "translation": "парчи,"
     },
     {
@@ -754,10 +682,10 @@
       "ayah": 54,
       "position": 7,
       "location": "55:54:7",
-      "line": 8,
+      "line": 7,
       "arabic": "وَجَنَى",
       "kind": "word",
-      "index_on_page": 63,
+      "index_on_page": 57,
       "translation": "а плоды"
     },
     {
@@ -766,10 +694,10 @@
       "ayah": 54,
       "position": 8,
       "location": "55:54:8",
-      "line": 8,
+      "line": 7,
       "arabic": "ٱلْجَنَّتَيْنِ",
       "kind": "word",
-      "index_on_page": 64,
+      "index_on_page": 58,
       "translation": "обоих садов –"
     },
     {
@@ -778,10 +706,10 @@
       "ayah": 54,
       "position": 9,
       "location": "55:54:9",
-      "line": 8,
+      "line": 7,
       "arabic": "دَانٍۢ",
       "kind": "word",
-      "index_on_page": 65,
+      "index_on_page": 59,
       "translation": "близко"
     },
     {
@@ -790,10 +718,10 @@
       "ayah": 55,
       "position": 1,
       "location": "55:55:1",
-      "line": 8,
+      "line": 7,
       "arabic": "فَبِأَىِّ",
       "kind": "word",
-      "index_on_page": 66,
+      "index_on_page": 60,
       "translation": "Какое же"
     },
     {
@@ -805,7 +733,7 @@
       "line": 8,
       "arabic": "ءَالَآءِ",
       "kind": "word",
-      "index_on_page": 67,
+      "index_on_page": 61,
       "translation": "из благодеяний"
     },
     {
@@ -817,7 +745,7 @@
       "line": 8,
       "arabic": "رَبِّكُمَا",
       "kind": "word",
-      "index_on_page": 68,
+      "index_on_page": 62,
       "translation": "Господа вашего (двоих)"
     },
     {
@@ -826,10 +754,10 @@
       "ayah": 55,
       "position": 4,
       "location": "55:55:4",
-      "line": 9,
+      "line": 8,
       "arabic": "تُكَذِّبَانِ",
       "kind": "word",
-      "index_on_page": 69,
+      "index_on_page": 63,
       "translation": "вы (двое) сочтёте ложным?"
     },
     {
@@ -838,10 +766,10 @@
       "ayah": 56,
       "position": 1,
       "location": "55:56:1",
-      "line": 9,
+      "line": 8,
       "arabic": "فِيهِنَّ",
       "kind": "word",
-      "index_on_page": 70,
+      "index_on_page": 64,
       "translation": "В них"
     },
     {
@@ -850,10 +778,10 @@
       "ayah": 56,
       "position": 2,
       "location": "55:56:2",
-      "line": 9,
+      "line": 8,
       "arabic": "قَـٰصِرَٰتُ",
       "kind": "word",
-      "index_on_page": 71,
+      "index_on_page": 65,
       "translation": "берегущие"
     },
     {
@@ -862,10 +790,10 @@
       "ayah": 56,
       "position": 3,
       "location": "55:56:3",
-      "line": 9,
+      "line": 8,
       "arabic": "ٱلطَّرْفِ",
       "kind": "word",
-      "index_on_page": 72,
+      "index_on_page": 66,
       "translation": "свои взоры,"
     },
     {
@@ -874,10 +802,10 @@
       "ayah": 56,
       "position": 4,
       "location": "55:56:4",
-      "line": 9,
+      "line": 8,
       "arabic": "لَمْ",
       "kind": "word",
-      "index_on_page": 73,
+      "index_on_page": 67,
       "translation": "не"
     },
     {
@@ -886,10 +814,10 @@
       "ayah": 56,
       "position": 5,
       "location": "55:56:5",
-      "line": 9,
+      "line": 8,
       "arabic": "يَطْمِثْهُنَّ",
       "kind": "word",
-      "index_on_page": 74,
+      "index_on_page": 68,
       "translation": "коснулся которых"
     },
     {
@@ -901,7 +829,7 @@
       "line": 9,
       "arabic": "إِنسٌۭ",
       "kind": "word",
-      "index_on_page": 75,
+      "index_on_page": 69,
       "translation": "(ни) человек"
     },
     {
@@ -913,7 +841,7 @@
       "line": 9,
       "arabic": "قَبْلَهُمْ",
       "kind": "word",
-      "index_on_page": 76,
+      "index_on_page": 70,
       "translation": "до них,"
     },
     {
@@ -922,10 +850,10 @@
       "ayah": 56,
       "position": 8,
       "location": "55:56:8",
-      "line": 10,
+      "line": 9,
       "arabic": "وَلَا",
       "kind": "word",
-      "index_on_page": 77,
+      "index_on_page": 71,
       "translation": "и ни"
     },
     {
@@ -934,10 +862,10 @@
       "ayah": 56,
       "position": 9,
       "location": "55:56:9",
-      "line": 10,
+      "line": 9,
       "arabic": "جَآنٌّۭ",
       "kind": "word",
-      "index_on_page": 78,
+      "index_on_page": 72,
       "translation": "джинн."
     },
     {
@@ -946,10 +874,10 @@
       "ayah": 57,
       "position": 1,
       "location": "55:57:1",
-      "line": 10,
+      "line": 9,
       "arabic": "فَبِأَىِّ",
       "kind": "word",
-      "index_on_page": 79,
+      "index_on_page": 73,
       "translation": "Какое же"
     },
     {
@@ -958,10 +886,10 @@
       "ayah": 57,
       "position": 2,
       "location": "55:57:2",
-      "line": 10,
+      "line": 9,
       "arabic": "ءَالَآءِ",
       "kind": "word",
-      "index_on_page": 80,
+      "index_on_page": 74,
       "translation": "из благодеяний"
     },
     {
@@ -970,10 +898,10 @@
       "ayah": 57,
       "position": 3,
       "location": "55:57:3",
-      "line": 10,
+      "line": 9,
       "arabic": "رَبِّكُمَا",
       "kind": "word",
-      "index_on_page": 81,
+      "index_on_page": 75,
       "translation": "Господа вашего (двоих)"
     },
     {
@@ -982,10 +910,10 @@
       "ayah": 57,
       "position": 4,
       "location": "55:57:4",
-      "line": 10,
+      "line": 9,
       "arabic": "تُكَذِّبَانِ",
       "kind": "word",
-      "index_on_page": 82,
+      "index_on_page": 76,
       "translation": "вы (двое) сочтёте ложным?"
     },
     {
@@ -994,10 +922,10 @@
       "ayah": 58,
       "position": 1,
       "location": "55:58:1",
-      "line": 10,
+      "line": 9,
       "arabic": "كَأَنَّهُنَّ",
       "kind": "word",
-      "index_on_page": 83,
+      "index_on_page": 77,
       "translation": "Подобны они"
     },
     {
@@ -1009,7 +937,7 @@
       "line": 10,
       "arabic": "ٱلْيَاقُوتُ",
       "kind": "word",
-      "index_on_page": 84,
+      "index_on_page": 78,
       "translation": "яхонту"
     },
     {
@@ -1018,10 +946,10 @@
       "ayah": 58,
       "position": 3,
       "location": "55:58:3",
-      "line": 11,
+      "line": 10,
       "arabic": "وَٱلْمَرْجَانُ",
       "kind": "word",
-      "index_on_page": 85,
+      "index_on_page": 79,
       "translation": "и кораллам."
     },
     {
@@ -1030,10 +958,10 @@
       "ayah": 59,
       "position": 1,
       "location": "55:59:1",
-      "line": 11,
+      "line": 10,
       "arabic": "فَبِأَىِّ",
       "kind": "word",
-      "index_on_page": 86,
+      "index_on_page": 80,
       "translation": "Какое же"
     },
     {
@@ -1042,10 +970,10 @@
       "ayah": 59,
       "position": 2,
       "location": "55:59:2",
-      "line": 11,
+      "line": 10,
       "arabic": "ءَالَآءِ",
       "kind": "word",
-      "index_on_page": 87,
+      "index_on_page": 81,
       "translation": "из благодеяний"
     },
     {
@@ -1054,10 +982,10 @@
       "ayah": 59,
       "position": 3,
       "location": "55:59:3",
-      "line": 11,
+      "line": 10,
       "arabic": "رَبِّكُمَا",
       "kind": "word",
-      "index_on_page": 88,
+      "index_on_page": 82,
       "translation": "Господа вашего (двоих)"
     },
     {
@@ -1066,10 +994,10 @@
       "ayah": 59,
       "position": 4,
       "location": "55:59:4",
-      "line": 11,
+      "line": 10,
       "arabic": "تُكَذِّبَانِ",
       "kind": "word",
-      "index_on_page": 89,
+      "index_on_page": 83,
       "translation": "вы (двое) сочтёте ложным?"
     },
     {
@@ -1081,7 +1009,7 @@
       "line": 11,
       "arabic": "هَلْ",
       "kind": "word",
-      "index_on_page": 90,
+      "index_on_page": 84,
       "translation": "(Будет) ли"
     },
     {
@@ -1093,7 +1021,7 @@
       "line": 11,
       "arabic": "جَزَآءُ",
       "kind": "word",
-      "index_on_page": 91,
+      "index_on_page": 85,
       "translation": "воздаянием"
     },
     {
@@ -1102,10 +1030,10 @@
       "ayah": 60,
       "position": 3,
       "location": "55:60:3",
-      "line": 12,
+      "line": 11,
       "arabic": "ٱلْإِحْسَـٰنِ",
       "kind": "word",
-      "index_on_page": 92,
+      "index_on_page": 86,
       "translation": "(за) благодеяние"
     },
     {
@@ -1114,10 +1042,10 @@
       "ayah": 60,
       "position": 4,
       "location": "55:60:4",
-      "line": 12,
+      "line": 11,
       "arabic": "إِلَّا",
       "kind": "word",
-      "index_on_page": 93,
+      "index_on_page": 87,
       "translation": "кроме"
     },
     {
@@ -1126,10 +1054,10 @@
       "ayah": 60,
       "position": 5,
       "location": "55:60:5",
-      "line": 12,
+      "line": 11,
       "arabic": "ٱلْإِحْسَـٰنُ",
       "kind": "word",
-      "index_on_page": 94,
+      "index_on_page": 88,
       "translation": "благодеяния?"
     },
     {
@@ -1138,10 +1066,10 @@
       "ayah": 61,
       "position": 1,
       "location": "55:61:1",
-      "line": 12,
+      "line": 11,
       "arabic": "فَبِأَىِّ",
       "kind": "word",
-      "index_on_page": 95,
+      "index_on_page": 89,
       "translation": "Какое же"
     },
     {
@@ -1150,10 +1078,10 @@
       "ayah": 61,
       "position": 2,
       "location": "55:61:2",
-      "line": 12,
+      "line": 11,
       "arabic": "ءَالَآءِ",
       "kind": "word",
-      "index_on_page": 96,
+      "index_on_page": 90,
       "translation": "из благодеяний"
     },
     {
@@ -1162,10 +1090,10 @@
       "ayah": 61,
       "position": 3,
       "location": "55:61:3",
-      "line": 12,
+      "line": 11,
       "arabic": "رَبِّكُمَا",
       "kind": "word",
-      "index_on_page": 97,
+      "index_on_page": 91,
       "translation": "Господа вашего (двоих)"
     },
     {
@@ -1177,7 +1105,7 @@
       "line": 12,
       "arabic": "تُكَذِّبَانِ",
       "kind": "word",
-      "index_on_page": 98,
+      "index_on_page": 92,
       "translation": "вы (двое) сочтёте ложным?"
     },
     {
@@ -1186,10 +1114,10 @@
       "ayah": 62,
       "position": 1,
       "location": "55:62:1",
-      "line": 13,
+      "line": 12,
       "arabic": "وَمِن",
       "kind": "word",
-      "index_on_page": 99,
+      "index_on_page": 93,
       "translation": "И кроме тех двух (садов)"
     },
     {
@@ -1198,10 +1126,10 @@
       "ayah": 62,
       "position": 2,
       "location": "55:62:2",
-      "line": 13,
+      "line": 12,
       "arabic": "دُونِهِمَا",
       "kind": "word",
-      "index_on_page": 100,
+      "index_on_page": 94,
       "translation": "помимо их двоих [перед ними]"
     },
     {
@@ -1210,10 +1138,10 @@
       "ayah": 62,
       "position": 3,
       "location": "55:62:3",
-      "line": 13,
+      "line": 12,
       "arabic": "جَنَّتَانِ",
       "kind": "word",
-      "index_on_page": 101,
+      "index_on_page": 95,
       "translation": "(ещё) два сада, –"
     },
     {
@@ -1222,10 +1150,10 @@
       "ayah": 63,
       "position": 1,
       "location": "55:63:1",
-      "line": 13,
+      "line": 12,
       "arabic": "فَبِأَىِّ",
       "kind": "word",
-      "index_on_page": 102,
+      "index_on_page": 96,
       "translation": "Какое же"
     },
     {
@@ -1234,10 +1162,10 @@
       "ayah": 63,
       "position": 2,
       "location": "55:63:2",
-      "line": 13,
+      "line": 12,
       "arabic": "ءَالَآءِ",
       "kind": "word",
-      "index_on_page": 103,
+      "index_on_page": 97,
       "translation": "из благодеяний"
     },
     {
@@ -1246,10 +1174,10 @@
       "ayah": 63,
       "position": 3,
       "location": "55:63:3",
-      "line": 13,
+      "line": 12,
       "arabic": "رَبِّكُمَا",
       "kind": "word",
-      "index_on_page": 104,
+      "index_on_page": 98,
       "translation": "Господа вашего (двоих)"
     },
     {
@@ -1261,7 +1189,7 @@
       "line": 13,
       "arabic": "تُكَذِّبَانِ",
       "kind": "word",
-      "index_on_page": 105,
+      "index_on_page": 99,
       "translation": "вы (двое) сочтёте ложным?"
     },
     {
@@ -1270,10 +1198,10 @@
       "ayah": 64,
       "position": 1,
       "location": "55:64:1",
-      "line": 14,
+      "line": 13,
       "arabic": "مُدْهَآمَّتَانِ",
       "kind": "word",
-      "index_on_page": 106,
+      "index_on_page": 100,
       "translation": "темно-зеленые"
     },
     {
@@ -1282,10 +1210,10 @@
       "ayah": 65,
       "position": 1,
       "location": "55:65:1",
-      "line": 14,
+      "line": 13,
       "arabic": "فَبِأَىِّ",
       "kind": "word",
-      "index_on_page": 107,
+      "index_on_page": 101,
       "translation": "Какое же"
     },
     {
@@ -1294,10 +1222,10 @@
       "ayah": 65,
       "position": 2,
       "location": "55:65:2",
-      "line": 14,
+      "line": 13,
       "arabic": "ءَالَآءِ",
       "kind": "word",
-      "index_on_page": 108,
+      "index_on_page": 102,
       "translation": "из благодеяний"
     },
     {
@@ -1306,10 +1234,10 @@
       "ayah": 65,
       "position": 3,
       "location": "55:65:3",
-      "line": 14,
+      "line": 13,
       "arabic": "رَبِّكُمَا",
       "kind": "word",
-      "index_on_page": 109,
+      "index_on_page": 103,
       "translation": "Господа вашего (двоих)"
     },
     {
@@ -1318,10 +1246,10 @@
       "ayah": 65,
       "position": 4,
       "location": "55:65:4",
-      "line": 14,
+      "line": 13,
       "arabic": "تُكَذِّبَانِ",
       "kind": "word",
-      "index_on_page": 110,
+      "index_on_page": 104,
       "translation": "вы (двое) сочтёте ложным?"
     },
     {
@@ -1333,7 +1261,7 @@
       "line": 14,
       "arabic": "فِيهِمَا",
       "kind": "word",
-      "index_on_page": 111,
+      "index_on_page": 105,
       "translation": "В них обоих"
     },
     {
@@ -1342,10 +1270,10 @@
       "ayah": 66,
       "position": 2,
       "location": "55:66:2",
-      "line": 15,
+      "line": 14,
       "arabic": "عَيْنَانِ",
       "kind": "word",
-      "index_on_page": 112,
+      "index_on_page": 106,
       "translation": "два источника"
     },
     {
@@ -1354,10 +1282,10 @@
       "ayah": 66,
       "position": 3,
       "location": "55:66:3",
-      "line": 15,
+      "line": 14,
       "arabic": "نَضَّاخَتَانِ",
       "kind": "word",
-      "index_on_page": 113,
+      "index_on_page": 107,
       "translation": "бьющих ключом."
     },
     {
@@ -1366,10 +1294,10 @@
       "ayah": 67,
       "position": 1,
       "location": "55:67:1",
-      "line": 15,
+      "line": 14,
       "arabic": "فَبِأَىِّ",
       "kind": "word",
-      "index_on_page": 114,
+      "index_on_page": 108,
       "translation": "Какое же"
     },
     {
@@ -1378,10 +1306,10 @@
       "ayah": 67,
       "position": 2,
       "location": "55:67:2",
-      "line": 15,
+      "line": 14,
       "arabic": "ءَالَآءِ",
       "kind": "word",
-      "index_on_page": 115,
+      "index_on_page": 109,
       "translation": "из благодеяний"
     },
     {
@@ -1390,10 +1318,10 @@
       "ayah": 67,
       "position": 3,
       "location": "55:67:3",
-      "line": 15,
+      "line": 14,
       "arabic": "رَبِّكُمَا",
       "kind": "word",
-      "index_on_page": 116,
+      "index_on_page": 110,
       "translation": "Господа вашего (двоих)"
     },
     {
@@ -1402,11 +1330,115 @@
       "ayah": 67,
       "position": 4,
       "location": "55:67:4",
+      "line": 14,
+      "arabic": "تُكَذِّبَانِ",
+      "kind": "word",
+      "index_on_page": 111,
+      "translation": "вы (двое) сочтёте ложным?"
+    },
+    {
+      "page": 533,
+      "surah": 55,
+      "ayah": 68,
+      "position": 1,
+      "location": "55:68:1",
+      "line": 15,
+      "arabic": "فِيهِمَا",
+      "kind": "word",
+      "index_on_page": 112,
+      "translation": "В них обоих",
+      "source_page": 534
+    },
+    {
+      "page": 533,
+      "surah": 55,
+      "ayah": 68,
+      "position": 2,
+      "location": "55:68:2",
+      "line": 15,
+      "arabic": "فَـٰكِهَةٌ",
+      "kind": "word",
+      "index_on_page": 113,
+      "translation": "фрукты,",
+      "source_page": 534
+    },
+    {
+      "page": 533,
+      "surah": 55,
+      "ayah": 68,
+      "position": 3,
+      "location": "55:68:3",
+      "line": 15,
+      "arabic": "وَنَخْلٌ",
+      "kind": "word",
+      "index_on_page": 114,
+      "translation": "и пальмы,",
+      "source_page": 534
+    },
+    {
+      "page": 533,
+      "surah": 55,
+      "ayah": 68,
+      "position": 4,
+      "location": "55:68:4",
+      "line": 15,
+      "arabic": "وَرُمَّانٌ",
+      "kind": "word",
+      "index_on_page": 115,
+      "translation": "и гранаты.",
+      "source_page": 534
+    },
+    {
+      "page": 533,
+      "surah": 55,
+      "ayah": 69,
+      "position": 1,
+      "location": "55:69:1",
+      "line": 15,
+      "arabic": "فَبِأَىِّ",
+      "kind": "word",
+      "index_on_page": 116,
+      "translation": "Какое же",
+      "source_page": 534
+    },
+    {
+      "page": 533,
+      "surah": 55,
+      "ayah": 69,
+      "position": 2,
+      "location": "55:69:2",
+      "line": 15,
+      "arabic": "ءَالَآءِ",
+      "kind": "word",
+      "index_on_page": 117,
+      "translation": "из благодеяний",
+      "source_page": 534
+    },
+    {
+      "page": 533,
+      "surah": 55,
+      "ayah": 69,
+      "position": 3,
+      "location": "55:69:3",
+      "line": 15,
+      "arabic": "رَبِّكُمَا",
+      "kind": "word",
+      "index_on_page": 118,
+      "translation": "Господа вашего (двоих)",
+      "source_page": 534
+    },
+    {
+      "page": 533,
+      "surah": 55,
+      "ayah": 69,
+      "position": 4,
+      "location": "55:69:4",
       "line": 15,
       "arabic": "تُكَذِّبَانِ",
       "kind": "word",
-      "index_on_page": 117,
-      "translation": "вы (двое) сочтёте ложным?"
+      "index_on_page": 119,
+      "translation": "вы (двое) сочтёте ложным?",
+      "source_page": 534
     }
   ],
   "diagnostics": {

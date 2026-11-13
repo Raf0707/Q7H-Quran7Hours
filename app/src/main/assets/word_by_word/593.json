@@ -2,18 +2,213 @@
   "page": 593,
   "url": "https://av.quranacademy.org/quran/mushaf/593",
   "method": "playwright",
-  "count": 111,
+  "count": 117,
   "words": [
+    {
+      "page": 593,
+      "surah": 88,
+      "ayah": 23,
+      "position": 1,
+      "location": "88:23:1",
+      "line": 1,
+      "arabic": "إِلَّا",
+      "kind": "word",
+      "index_on_page": 1,
+      "translation": "кроме",
+      "source_page": 592
+    },
+    {
+      "page": 593,
+      "surah": 88,
+      "ayah": 23,
+      "position": 2,
+      "location": "88:23:2",
+      "line": 1,
+      "arabic": "مَن",
+      "kind": "word",
+      "index_on_page": 2,
+      "translation": "того, кто",
+      "source_page": 592
+    },
+    {
+      "page": 593,
+      "surah": 88,
+      "ayah": 23,
+      "position": 3,
+      "location": "88:23:3",
+      "line": 1,
+      "arabic": "تَوَلَّىٰ",
+      "kind": "word",
+      "index_on_page": 3,
+      "translation": "отвернулся",
+      "source_page": 592
+    },
+    {
+      "page": 593,
+      "surah": 88,
+      "ayah": 23,
+      "position": 4,
+      "location": "88:23:4",
+      "line": 1,
+      "arabic": "وَكَفَرَ",
+      "kind": "word",
+      "index_on_page": 4,
+      "translation": "и стал неверующим.",
+      "source_page": 592
+    },
+    {
+      "page": 593,
+      "surah": 88,
+      "ayah": 24,
+      "position": 1,
+      "location": "88:24:1",
+      "line": 1,
+      "arabic": "فَيُعَذِّبُهُ",
+      "kind": "word",
+      "index_on_page": 5,
+      "translation": "и накажет его",
+      "source_page": 592
+    },
+    {
+      "page": 593,
+      "surah": 88,
+      "ayah": 24,
+      "position": 2,
+      "location": "88:24:2",
+      "line": 1,
+      "arabic": "ٱللَّهُ",
+      "kind": "word",
+      "index_on_page": 6,
+      "translation": "Аллах",
+      "source_page": 592
+    },
+    {
+      "page": 593,
+      "surah": 88,
+      "ayah": 24,
+      "position": 3,
+      "location": "88:24:3",
+      "line": 1,
+      "arabic": "ٱلْعَذَابَ",
+      "kind": "word",
+      "index_on_page": 7,
+      "translation": "наказанием",
+      "source_page": 592
+    },
+    {
+      "page": 593,
+      "surah": 88,
+      "ayah": 24,
+      "position": 4,
+      "location": "88:24:4",
+      "line": 1,
+      "arabic": "ٱلْأَكْبَرَ",
+      "kind": "word",
+      "index_on_page": 8,
+      "translation": "величайшим.",
+      "source_page": 592
+    },
+    {
+      "page": 593,
+      "surah": 88,
+      "ayah": 25,
+      "position": 1,
+      "location": "88:25:1",
+      "line": 2,
+      "arabic": "إِنَّ",
+      "kind": "word",
+      "index_on_page": 9,
+      "translation": "Поистине,",
+      "source_page": 592
+    },
+    {
+      "page": 593,
+      "surah": 88,
+      "ayah": 25,
+      "position": 2,
+      "location": "88:25:2",
+      "line": 2,
+      "arabic": "إِلَيْنَآ",
+      "kind": "word",
+      "index_on_page": 10,
+      "translation": "к Нам",
+      "source_page": 592
+    },
+    {
+      "page": 593,
+      "surah": 88,
+      "ayah": 25,
+      "position": 3,
+      "location": "88:25:3",
+      "line": 2,
+      "arabic": "إِيَابَهُمْ",
+      "kind": "word",
+      "index_on_page": 11,
+      "translation": "их возвращение.",
+      "source_page": 592
+    },
+    {
+      "page": 593,
+      "surah": 88,
+      "ayah": 26,
+      "position": 1,
+      "location": "88:26:1",
+      "line": 2,
+      "arabic": "ثُمَّ",
+      "kind": "word",
+      "index_on_page": 12,
+      "translation": "Затем",
+      "source_page": 592
+    },
+    {
+      "page": 593,
+      "surah": 88,
+      "ayah": 26,
+      "position": 2,
+      "location": "88:26:2",
+      "line": 2,
+      "arabic": "إِنَّ",
+      "kind": "word",
+      "index_on_page": 13,
+      "translation": "поистине,",
+      "source_page": 592
+    },
+    {
+      "page": 593,
+      "surah": 88,
+      "ayah": 26,
+      "position": 3,
+      "location": "88:26:3",
+      "line": 2,
+      "arabic": "عَلَيْنَا",
+      "kind": "word",
+      "index_on_page": 14,
+      "translation": "на Нас",
+      "source_page": 592
+    },
+    {
+      "page": 593,
+      "surah": 88,
+      "ayah": 26,
+      "position": 4,
+      "location": "88:26:4",
+      "line": 2,
+      "arabic": "حِسَابَهُم",
+      "kind": "word",
+      "index_on_page": 15,
+      "translation": "их расчёт.",
+      "source_page": 592
+    },
     {
       "page": 593,
       "surah": 89,
       "ayah": 1,
       "position": 1,
       "location": "89:1:1",
-      "line": 3,
+      "line": 5,
       "arabic": "وَٱلْفَجْرِ",
       "kind": "word",
-      "index_on_page": 1,
+      "index_on_page": 16,
       "translation": "Клянусь зарёю,"
     },
     {
@@ -22,10 +217,10 @@
       "ayah": 2,
       "position": 1,
       "location": "89:2:1",
-      "line": 3,
+      "line": 5,
       "arabic": "وَلَيَالٍ",
       "kind": "word",
-      "index_on_page": 2,
+      "index_on_page": 17,
       "translation": "и ночами"
     },
     {
@@ -34,10 +229,10 @@
       "ayah": 2,
       "position": 2,
       "location": "89:2:2",
-      "line": 3,
+      "line": 5,
       "arabic": "عَشْرٍۢ",
       "kind": "word",
-      "index_on_page": 3,
+      "index_on_page": 18,
       "translation": "десятью,"
     },
     {
@@ -46,10 +241,10 @@
       "ayah": 3,
       "position": 1,
       "location": "89:3:1",
-      "line": 3,
+      "line": 5,
       "arabic": "وَٱلشَّفْعِ",
       "kind": "word",
-      "index_on_page": 4,
+      "index_on_page": 19,
       "translation": "и чётом"
     },
     {
@@ -58,10 +253,10 @@
       "ayah": 3,
       "position": 2,
       "location": "89:3:2",
-      "line": 3,
+      "line": 5,
       "arabic": "وَٱلْوَتْرِ",
       "kind": "word",
-      "index_on_page": 5,
+      "index_on_page": 20,
       "translation": "и нечетом,"
     },
     {
@@ -70,10 +265,10 @@
       "ayah": 4,
       "position": 1,
       "location": "89:4:1",
-      "line": 3,
+      "line": 5,
       "arabic": "وَٱلَّيْلِ",
       "kind": "word",
-      "index_on_page": 6,
+      "index_on_page": 21,
       "translation": "и ночью,"
     },
     {
@@ -82,10 +277,10 @@
       "ayah": 4,
       "position": 2,
       "location": "89:4:2",
-      "line": 3,
+      "line": 5,
       "arabic": "إِذَا",
       "kind": "word",
-      "index_on_page": 7,
+      "index_on_page": 22,
       "translation": "когда"
     },
     {
@@ -94,10 +289,10 @@
       "ayah": 4,
       "position": 3,
       "location": "89:4:3",
-      "line": 3,
+      "line": 5,
       "arabic": "يَسْرِ",
       "kind": "word",
-      "index_on_page": 8,
+      "index_on_page": 23,
       "translation": "она движется."
     },
     {
@@ -106,10 +301,10 @@
       "ayah": 5,
       "position": 1,
       "location": "89:5:1",
-      "line": 4,
+      "line": 6,
       "arabic": "هَلْ",
       "kind": "word",
-      "index_on_page": 9,
+      "index_on_page": 24,
       "translation": "(Есть) ли"
     },
     {
@@ -118,10 +313,10 @@
       "ayah": 5,
       "position": 2,
       "location": "89:5:2",
-      "line": 4,
+      "line": 6,
       "arabic": "فِى",
       "kind": "word",
-      "index_on_page": 10,
+      "index_on_page": 25,
       "translation": "в"
     },
     {
@@ -130,10 +325,10 @@
       "ayah": 5,
       "position": 3,
       "location": "89:5:3",
-      "line": 4,
+      "line": 6,
       "arabic": "ذَٰلِكَ",
       "kind": "word",
-      "index_on_page": 11,
+      "index_on_page": 26,
       "translation": "этом"
     },
     {
@@ -142,10 +337,10 @@
       "ayah": 5,
       "position": 4,
       "location": "89:5:4",
-      "line": 4,
+      "line": 6,
       "arabic": "قَسَمٌۭ",
       "kind": "word",
-      "index_on_page": 12,
+      "index_on_page": 27,
       "translation": "клятва"
     },
     {
@@ -154,10 +349,10 @@
       "ayah": 5,
       "position": 5,
       "location": "89:5:5",
-      "line": 4,
+      "line": 6,
       "arabic": "لِّذِى",
       "kind": "word",
-      "index_on_page": 13,
+      "index_on_page": 28,
       "translation": "для обладающего"
     },
     {
@@ -166,10 +361,10 @@
       "ayah": 5,
       "position": 6,
       "location": "89:5:6",
-      "line": 4,
+      "line": 6,
       "arabic": "حِجْرٍ",
       "kind": "word",
-      "index_on_page": 14,
+      "index_on_page": 29,
       "translation": "разумом?"
     },
     {
@@ -178,10 +373,10 @@
       "ayah": 6,
       "position": 1,
       "location": "89:6:1",
-      "line": 4,
+      "line": 6,
       "arabic": "أَلَمْ",
       "kind": "word",
-      "index_on_page": 15,
+      "index_on_page": 30,
       "translation": "Разве не"
     },
     {
@@ -190,10 +385,10 @@
       "ayah": 6,
       "position": 2,
       "location": "89:6:2",
-      "line": 4,
+      "line": 6,
       "arabic": "تَرَ",
       "kind": "word",
-      "index_on_page": 16,
+      "index_on_page": 31,
       "translation": "видел ты,"
     },
     {
@@ -202,10 +397,10 @@
       "ayah": 6,
       "position": 3,
       "location": "89:6:3",
-      "line": 4,
+      "line": 6,
       "arabic": "كَيْفَ",
       "kind": "word",
-      "index_on_page": 17,
+      "index_on_page": 32,
       "translation": "как"
     },
     {
@@ -214,10 +409,10 @@
       "ayah": 6,
       "position": 4,
       "location": "89:6:4",
-      "line": 4,
+      "line": 6,
       "arabic": "فَعَلَ",
       "kind": "word",
-      "index_on_page": 18,
+      "index_on_page": 33,
       "translation": "поступил"
     },
     {
@@ -226,10 +421,10 @@
       "ayah": 6,
       "position": 5,
       "location": "89:6:5",
-      "line": 4,
+      "line": 6,
       "arabic": "رَبُّكَ",
       "kind": "word",
-      "index_on_page": 19,
+      "index_on_page": 34,
       "translation": "твой Господь"
     },
     {
@@ -238,10 +433,10 @@
       "ayah": 6,
       "position": 6,
       "location": "89:6:6",
-      "line": 4,
+      "line": 6,
       "arabic": "بِعَادٍ",
       "kind": "word",
-      "index_on_page": 20,
+      "index_on_page": 35,
       "translation": "с ‘адитами,"
     },
     {
@@ -250,10 +445,10 @@
       "ayah": 7,
       "position": 1,
       "location": "89:7:1",
-      "line": 5,
+      "line": 7,
       "arabic": "إِرَمَ",
       "kind": "word",
-      "index_on_page": 21,
+      "index_on_page": 36,
       "translation": "Ирамом,"
     },
     {
@@ -262,10 +457,10 @@
       "ayah": 7,
       "position": 2,
       "location": "89:7:2",
-      "line": 5,
+      "line": 7,
       "arabic": "ذَاتِ",
       "kind": "word",
-      "index_on_page": 22,
+      "index_on_page": 37,
       "translation": "обладателем"
     },
     {
@@ -274,10 +469,10 @@
       "ayah": 7,
       "position": 3,
       "location": "89:7:3",
-      "line": 5,
+      "line": 7,
       "arabic": "ٱلْعِمَادِ",
       "kind": "word",
-      "index_on_page": 23,
+      "index_on_page": 38,
       "translation": "колонн,"
     },
     {
@@ -286,10 +481,10 @@
       "ayah": 8,
       "position": 1,
       "location": "89:8:1",
-      "line": 5,
+      "line": 7,
       "arabic": "ٱلَّتِى",
       "kind": "word",
-      "index_on_page": 24,
+      "index_on_page": 39,
       "translation": "которым"
     },
     {
@@ -298,10 +493,10 @@
       "ayah": 8,
       "position": 2,
       "location": "89:8:2",
-      "line": 5,
+      "line": 7,
       "arabic": "لَمْ",
       "kind": "word",
-      "index_on_page": 25,
+      "index_on_page": 40,
       "translation": "не"
     },
     {
@@ -310,10 +505,10 @@
       "ayah": 8,
       "position": 3,
       "location": "89:8:3",
-      "line": 5,
+      "line": 7,
       "arabic": "يُخْلَقْ",
       "kind": "word",
-      "index_on_page": 26,
+      "index_on_page": 41,
       "translation": "было создано"
     },
     {
@@ -322,10 +517,10 @@
       "ayah": 8,
       "position": 4,
       "location": "89:8:4",
-      "line": 5,
+      "line": 7,
       "arabic": "مِثْلُهَا",
       "kind": "word",
-      "index_on_page": 27,
+      "index_on_page": 42,
       "translation": "подобных (им)"
     },
     {
@@ -334,10 +529,10 @@
       "ayah": 8,
       "position": 5,
       "location": "89:8:5",
-      "line": 5,
+      "line": 7,
       "arabic": "فِى",
       "kind": "word",
-      "index_on_page": 28,
+      "index_on_page": 43,
       "translation": "в"
     },
     {
@@ -346,10 +541,10 @@
       "ayah": 8,
       "position": 6,
       "location": "89:8:6",
-      "line": 5,
+      "line": 7,
       "arabic": "ٱلْبِلَـٰدِ",
       "kind": "word",
-      "index_on_page": 29,
+      "index_on_page": 44,
       "translation": "странах,"
     },
     {
@@ -358,10 +553,10 @@
       "ayah": 9,
       "position": 1,
       "location": "89:9:1",
-      "line": 6,
+      "line": 7,
       "arabic": "وَثَمُودَ",
       "kind": "word",
-      "index_on_page": 30,
+      "index_on_page": 45,
       "translation": "и самудитами,"
     },
     {
@@ -370,10 +565,10 @@
       "ayah": 9,
       "position": 2,
       "location": "89:9:2",
-      "line": 6,
+      "line": 7,
       "arabic": "ٱلَّذِينَ",
       "kind": "word",
-      "index_on_page": 31,
+      "index_on_page": 46,
       "translation": "которые"
     },
     {
@@ -382,10 +577,10 @@
       "ayah": 9,
       "position": 3,
       "location": "89:9:3",
-      "line": 6,
+      "line": 8,
       "arabic": "جَابُوا۟",
       "kind": "word",
-      "index_on_page": 32,
+      "index_on_page": 47,
       "translation": "рассекали"
     },
     {
@@ -394,10 +589,10 @@
       "ayah": 9,
       "position": 4,
       "location": "89:9:4",
-      "line": 6,
+      "line": 8,
       "arabic": "ٱلصَّخْرَ",
       "kind": "word",
-      "index_on_page": 33,
+      "index_on_page": 48,
       "translation": "скалы"
     },
     {
@@ -406,10 +601,10 @@
       "ayah": 9,
       "position": 5,
       "location": "89:9:5",
-      "line": 6,
+      "line": 8,
       "arabic": "بِٱلْوَادِ",
       "kind": "word",
-      "index_on_page": 34,
+      "index_on_page": 49,
       "translation": "в долине,"
     },
     {
@@ -418,10 +613,10 @@
       "ayah": 10,
       "position": 1,
       "location": "89:10:1",
-      "line": 6,
+      "line": 8,
       "arabic": "وَفِرْعَوْنَ",
       "kind": "word",
-      "index_on_page": 35,
+      "index_on_page": 50,
       "translation": "и с Фараоном,"
     },
     {
@@ -430,10 +625,10 @@
       "ayah": 10,
       "position": 2,
       "location": "89:10:2",
-      "line": 6,
+      "line": 8,
       "arabic": "ذِى",
       "kind": "word",
-      "index_on_page": 36,
+      "index_on_page": 51,
       "translation": "обладателем"
     },
     {
@@ -442,10 +637,10 @@
       "ayah": 10,
       "position": 3,
       "location": "89:10:3",
-      "line": 6,
+      "line": 8,
       "arabic": "ٱلْأَوْتَادِ",
       "kind": "word",
-      "index_on_page": 37,
+      "index_on_page": 52,
       "translation": "кольев,"
     },
     {
@@ -454,10 +649,10 @@
       "ayah": 11,
       "position": 1,
       "location": "89:11:1",
-      "line": 7,
+      "line": 8,
       "arabic": "ٱلَّذِينَ",
       "kind": "word",
-      "index_on_page": 38,
+      "index_on_page": 53,
       "translation": "которые"
     },
     {
@@ -466,10 +661,10 @@
       "ayah": 11,
       "position": 2,
       "location": "89:11:2",
-      "line": 7,
+      "line": 8,
       "arabic": "طَغَوْا۟",
       "kind": "word",
-      "index_on_page": 39,
+      "index_on_page": 54,
       "translation": "преступали границы"
     },
     {
@@ -478,10 +673,10 @@
       "ayah": 11,
       "position": 3,
       "location": "89:11:3",
-      "line": 7,
+      "line": 8,
       "arabic": "فِى",
       "kind": "word",
-      "index_on_page": 40,
+      "index_on_page": 55,
       "translation": "в"
     },
     {
@@ -490,10 +685,10 @@
       "ayah": 11,
       "position": 4,
       "location": "89:11:4",
-      "line": 7,
+      "line": 9,
       "arabic": "ٱلْبِلَـٰدِ",
       "kind": "word",
-      "index_on_page": 41,
+      "index_on_page": 56,
       "translation": "странах"
     },
     {
@@ -502,10 +697,10 @@
       "ayah": 12,
       "position": 1,
       "location": "89:12:1",
-      "line": 7,
+      "line": 9,
       "arabic": "فَأَكْثَرُوا۟",
       "kind": "word",
-      "index_on_page": 42,
+      "index_on_page": 57,
       "translation": "и умножали"
     },
     {
@@ -514,10 +709,10 @@
       "ayah": 12,
       "position": 2,
       "location": "89:12:2",
-      "line": 7,
+      "line": 9,
       "arabic": "فِيهَا",
       "kind": "word",
-      "index_on_page": 43,
+      "index_on_page": 58,
       "translation": "в них"
     },
     {
@@ -526,10 +721,10 @@
       "ayah": 12,
       "position": 3,
       "location": "89:12:3",
-      "line": 7,
+      "line": 9,
       "arabic": "ٱلْفَسَادَ",
       "kind": "word",
-      "index_on_page": 44,
+      "index_on_page": 59,
       "translation": "нечестие?"
     },
     {
@@ -538,10 +733,10 @@
       "ayah": 13,
       "position": 1,
       "location": "89:13:1",
-      "line": 7,
+      "line": 9,
       "arabic": "فَصَبَّ",
       "kind": "word",
-      "index_on_page": 45,
+      "index_on_page": 60,
       "translation": "И пролил"
     },
     {
@@ -550,10 +745,10 @@
       "ayah": 13,
       "position": 2,
       "location": "89:13:2",
-      "line": 8,
+      "line": 9,
       "arabic": "عَلَيْهِمْ",
       "kind": "word",
-      "index_on_page": 46,
+      "index_on_page": 61,
       "translation": "на них"
     },
     {
@@ -562,10 +757,10 @@
       "ayah": 13,
       "position": 3,
       "location": "89:13:3",
-      "line": 8,
+      "line": 9,
       "arabic": "رَبُّكَ",
       "kind": "word",
-      "index_on_page": 47,
+      "index_on_page": 62,
       "translation": "Господь твой"
     },
     {
@@ -574,10 +769,10 @@
       "ayah": 13,
       "position": 4,
       "location": "89:13:4",
-      "line": 8,
+      "line": 9,
       "arabic": "سَوْطَ",
       "kind": "word",
-      "index_on_page": 48,
+      "index_on_page": 63,
       "translation": "бич"
     },
     {
@@ -586,10 +781,10 @@
       "ayah": 13,
       "position": 5,
       "location": "89:13:5",
-      "line": 8,
+      "line": 10,
       "arabic": "عَذَابٍ",
       "kind": "word",
-      "index_on_page": 49,
+      "index_on_page": 64,
       "translation": "наказания."
     },
     {
@@ -598,10 +793,10 @@
       "ayah": 14,
       "position": 1,
       "location": "89:14:1",
-      "line": 8,
+      "line": 10,
       "arabic": "إِنَّ",
       "kind": "word",
-      "index_on_page": 50,
+      "index_on_page": 65,
       "translation": "Поистине,"
     },
     {
@@ -610,10 +805,10 @@
       "ayah": 14,
       "position": 2,
       "location": "89:14:2",
-      "line": 8,
+      "line": 10,
       "arabic": "رَبَّكَ",
       "kind": "word",
-      "index_on_page": 51,
+      "index_on_page": 66,
       "translation": "Господь твой,"
     },
     {
@@ -622,10 +817,10 @@
       "ayah": 14,
       "position": 3,
       "location": "89:14:3",
-      "line": 8,
+      "line": 10,
       "arabic": "لَبِٱلْمِرْصَادِ",
       "kind": "word",
-      "index_on_page": 52,
+      "index_on_page": 67,
       "translation": "однозначно, в засаде."
     },
     {
@@ -634,10 +829,10 @@
       "ayah": 15,
       "position": 1,
       "location": "89:15:1",
-      "line": 8,
+      "line": 10,
       "arabic": "فَأَمَّا",
       "kind": "word",
-      "index_on_page": 53,
+      "index_on_page": 68,
       "translation": "А что касается"
     },
     {
@@ -646,10 +841,10 @@
       "ayah": 15,
       "position": 2,
       "location": "89:15:2",
-      "line": 9,
+      "line": 10,
       "arabic": "ٱلْإِنسَـٰنُ",
       "kind": "word",
-      "index_on_page": 54,
+      "index_on_page": 69,
       "translation": "человека,"
     },
     {
@@ -658,10 +853,10 @@
       "ayah": 15,
       "position": 3,
       "location": "89:15:3",
-      "line": 9,
+      "line": 10,
       "arabic": "إِذَا",
       "kind": "word",
-      "index_on_page": 55,
+      "index_on_page": 70,
       "translation": "когда"
     },
     {
@@ -670,10 +865,10 @@
       "ayah": 15,
       "position": 4,
       "location": "89:15:4",
-      "line": 9,
+      "line": 10,
       "arabic": "مَا",
       "kind": "word",
-      "index_on_page": 56,
+      "index_on_page": 71,
       "translation": "то, что"
     },
     {
@@ -682,10 +877,10 @@
       "ayah": 15,
       "position": 5,
       "location": "89:15:5",
-      "line": 9,
+      "line": 10,
       "arabic": "ٱبْتَلَىٰهُ",
       "kind": "word",
-      "index_on_page": 57,
+      "index_on_page": 72,
       "translation": "испытывает его"
     },
     {
@@ -694,10 +889,10 @@
       "ayah": 15,
       "position": 6,
       "location": "89:15:6",
-      "line": 9,
+      "line": 11,
       "arabic": "رَبُّهُۥ",
       "kind": "word",
-      "index_on_page": 58,
+      "index_on_page": 73,
       "translation": "Господь его,"
     },
     {
@@ -706,10 +901,10 @@
       "ayah": 15,
       "position": 7,
       "location": "89:15:7",
-      "line": 9,
+      "line": 11,
       "arabic": "فَأَكْرَمَهُۥ",
       "kind": "word",
-      "index_on_page": 59,
+      "index_on_page": 74,
       "translation": "и почтит его"
     },
     {
@@ -718,10 +913,10 @@
       "ayah": 15,
       "position": 8,
       "location": "89:15:8",
-      "line": 9,
+      "line": 11,
       "arabic": "وَنَعَّمَهُۥ",
       "kind": "word",
-      "index_on_page": 60,
+      "index_on_page": 75,
       "translation": "и оделит благами его,"
     },
     {
@@ -730,10 +925,10 @@
       "ayah": 15,
       "position": 9,
       "location": "89:15:9",
-      "line": 9,
+      "line": 11,
       "arabic": "فَيَقُولُ",
       "kind": "word",
-      "index_on_page": 61,
+      "index_on_page": 76,
       "translation": "то он говорит:"
     },
     {
@@ -742,10 +937,10 @@
       "ayah": 15,
       "position": 10,
       "location": "89:15:10",
-      "line": 9,
+      "line": 11,
       "arabic": "رَبِّىٓ",
       "kind": "word",
-      "index_on_page": 62,
+      "index_on_page": 77,
       "translation": "«Господь мой"
     },
     {
@@ -754,10 +949,10 @@
       "ayah": 15,
       "position": 11,
       "location": "89:15:11",
-      "line": 9,
+      "line": 11,
       "arabic": "أَكْرَمَنِ",
       "kind": "word",
-      "index_on_page": 63,
+      "index_on_page": 78,
       "translation": "почтил меня!»"
     },
     {
@@ -766,10 +961,10 @@
       "ayah": 16,
       "position": 1,
       "location": "89:16:1",
-      "line": 10,
+      "line": 11,
       "arabic": "وَأَمَّآ",
       "kind": "word",
-      "index_on_page": 64,
+      "index_on_page": 79,
       "translation": "А что касается того,"
     },
     {
@@ -778,10 +973,10 @@
       "ayah": 16,
       "position": 2,
       "location": "89:16:2",
-      "line": 10,
+      "line": 11,
       "arabic": "إِذَا",
       "kind": "word",
-      "index_on_page": 65,
+      "index_on_page": 80,
       "translation": "когда"
     },
     {
@@ -790,10 +985,10 @@
       "ayah": 16,
       "position": 3,
       "location": "89:16:3",
-      "line": 10,
+      "line": 11,
       "arabic": "مَا",
       "kind": "word",
-      "index_on_page": 66,
+      "index_on_page": 81,
       "translation": "то, что"
     },
     {
@@ -802,10 +997,10 @@
       "ayah": 16,
       "position": 4,
       "location": "89:16:4",
-      "line": 10,
+      "line": 11,
       "arabic": "ٱبْتَلَىٰهُ",
       "kind": "word",
-      "index_on_page": 67,
+      "index_on_page": 82,
       "translation": "Он испытывает его"
     },
     {
@@ -814,10 +1009,10 @@
       "ayah": 16,
       "position": 5,
       "location": "89:16:5",
-      "line": 10,
+      "line": 12,
       "arabic": "فَقَدَرَ",
       "kind": "word",
-      "index_on_page": 68,
+      "index_on_page": 83,
       "translation": "и ограничит [сузит]"
     },
     {
@@ -826,10 +1021,10 @@
       "ayah": 16,
       "position": 6,
       "location": "89:16:6",
-      "line": 10,
+      "line": 12,
       "arabic": "عَلَيْهِ",
       "kind": "word",
-      "index_on_page": 69,
+      "index_on_page": 84,
       "translation": "ему"
     },
     {
@@ -838,10 +1033,10 @@
       "ayah": 16,
       "position": 7,
       "location": "89:16:7",
-      "line": 10,
+      "line": 12,
       "arabic": "رِزْقَهُۥ",
       "kind": "word",
-      "index_on_page": 70,
+      "index_on_page": 85,
       "translation": "удел его,"
     },
     {
@@ -850,10 +1045,10 @@
       "ayah": 16,
       "position": 8,
       "location": "89:16:8",
-      "line": 10,
+      "line": 12,
       "arabic": "فَيَقُولُ",
       "kind": "word",
-      "index_on_page": 71,
+      "index_on_page": 86,
       "translation": "то он говорит:"
     },
     {
@@ -862,10 +1057,10 @@
       "ayah": 16,
       "position": 9,
       "location": "89:16:9",
-      "line": 10,
+      "line": 12,
       "arabic": "رَبِّىٓ",
       "kind": "word",
-      "index_on_page": 72,
+      "index_on_page": 87,
       "translation": "«Господь мой"
     },
     {
@@ -874,10 +1069,10 @@
       "ayah": 16,
       "position": 10,
       "location": "89:16:10",
-      "line": 10,
+      "line": 12,
       "arabic": "أَهَـٰنَنِ",
       "kind": "word",
-      "index_on_page": 73,
+      "index_on_page": 88,
       "translation": "унизил меня!»"
     },
     {
@@ -886,10 +1081,10 @@
       "ayah": 17,
       "position": 1,
       "location": "89:17:1",
-      "line": 11,
+      "line": 12,
       "arabic": "كَلَّا ۖ",
       "kind": "word",
-      "index_on_page": 74,
+      "index_on_page": 89,
       "translation": "Так нет же!"
     },
     {
@@ -898,10 +1093,10 @@
       "ayah": 17,
       "position": 2,
       "location": "89:17:2",
-      "line": 11,
+      "line": 12,
       "arabic": "بَل",
       "kind": "word",
-      "index_on_page": 75,
+      "index_on_page": 90,
       "translation": "Наоборот,"
     },
     {
@@ -910,10 +1105,10 @@
       "ayah": 17,
       "position": 3,
       "location": "89:17:3",
-      "line": 11,
+      "line": 12,
       "arabic": "لَّا",
       "kind": "word",
-      "index_on_page": 76,
+      "index_on_page": 91,
       "translation": "не"
     },
     {
@@ -922,10 +1117,10 @@
       "ayah": 17,
       "position": 4,
       "location": "89:17:4",
-      "line": 11,
+      "line": 12,
       "arabic": "تُكْرِمُونَ",
       "kind": "word",
-      "index_on_page": 77,
+      "index_on_page": 92,
       "translation": "почитаете вы"
     },
     {
@@ -934,10 +1129,10 @@
       "ayah": 17,
       "position": 5,
       "location": "89:17:5",
-      "line": 11,
+      "line": 13,
       "arabic": "ٱلْيَتِيمَ",
       "kind": "word",
-      "index_on_page": 78,
+      "index_on_page": 93,
       "translation": "сироту,"
     },
     {
@@ -946,10 +1141,10 @@
       "ayah": 18,
       "position": 1,
       "location": "89:18:1",
-      "line": 11,
+      "line": 13,
       "arabic": "وَلَا",
       "kind": "word",
-      "index_on_page": 79,
+      "index_on_page": 94,
       "translation": "и не"
     },
     {
@@ -958,10 +1153,10 @@
       "ayah": 18,
       "position": 2,
       "location": "89:18:2",
-      "line": 11,
+      "line": 13,
       "arabic": "تَحَـٰٓضُّونَ",
       "kind": "word",
-      "index_on_page": 80,
+      "index_on_page": 95,
       "translation": "побуждаете друг друга"
     },
     {
@@ -970,10 +1165,10 @@
       "ayah": 18,
       "position": 3,
       "location": "89:18:3",
-      "line": 11,
+      "line": 13,
       "arabic": "عَلَىٰ",
       "kind": "word",
-      "index_on_page": 81,
+      "index_on_page": 96,
       "translation": "к"
     },
     {
@@ -982,10 +1177,10 @@
       "ayah": 18,
       "position": 4,
       "location": "89:18:4",
-      "line": 11,
+      "line": 13,
       "arabic": "طَعَامِ",
       "kind": "word",
-      "index_on_page": 82,
+      "index_on_page": 97,
       "translation": "кормлению"
     },
     {
@@ -994,10 +1189,10 @@
       "ayah": 18,
       "position": 5,
       "location": "89:18:5",
-      "line": 12,
+      "line": 13,
       "arabic": "ٱلْمِسْكِينِ",
       "kind": "word",
-      "index_on_page": 83,
+      "index_on_page": 98,
       "translation": "бедняка,"
     },
     {
@@ -1006,10 +1201,10 @@
       "ayah": 19,
       "position": 1,
       "location": "89:19:1",
-      "line": 12,
+      "line": 13,
       "arabic": "وَتَأْكُلُونَ",
       "kind": "word",
-      "index_on_page": 84,
+      "index_on_page": 99,
       "translation": "и пожираете вы"
     },
     {
@@ -1018,10 +1213,10 @@
       "ayah": 19,
       "position": 2,
       "location": "89:19:2",
-      "line": 12,
+      "line": 14,
       "arabic": "ٱلتُّرَاثَ",
       "kind": "word",
-      "index_on_page": 85,
+      "index_on_page": 100,
       "translation": "наследство"
     },
     {
@@ -1030,10 +1225,10 @@
       "ayah": 19,
       "position": 3,
       "location": "89:19:3",
-      "line": 12,
+      "line": 14,
       "arabic": "أَكْلًۭا",
       "kind": "word",
-      "index_on_page": 86,
+      "index_on_page": 101,
       "translation": "поеданием"
     },
     {
@@ -1042,10 +1237,10 @@
       "ayah": 19,
       "position": 4,
       "location": "89:19:4",
-      "line": 12,
+      "line": 14,
       "arabic": "لَّمًّۭا",
       "kind": "word",
-      "index_on_page": 87,
+      "index_on_page": 102,
       "translation": "усердным,"
     },
     {
@@ -1054,10 +1249,10 @@
       "ayah": 20,
       "position": 1,
       "location": "89:20:1",
-      "line": 13,
+      "line": 14,
       "arabic": "وَتُحِبُّونَ",
       "kind": "word",
-      "index_on_page": 88,
+      "index_on_page": 103,
       "translation": "и любите вы"
     },
     {
@@ -1066,10 +1261,10 @@
       "ayah": 20,
       "position": 2,
       "location": "89:20:2",
-      "line": 13,
+      "line": 14,
       "arabic": "ٱلْمَالَ",
       "kind": "word",
-      "index_on_page": 89,
+      "index_on_page": 104,
       "translation": "богатство"
     },
     {
@@ -1078,10 +1273,10 @@
       "ayah": 20,
       "position": 3,
       "location": "89:20:3",
-      "line": 13,
+      "line": 14,
       "arabic": "حُبًّۭا",
       "kind": "word",
-      "index_on_page": 90,
+      "index_on_page": 105,
       "translation": "любовью"
     },
     {
@@ -1090,10 +1285,10 @@
       "ayah": 20,
       "position": 4,
       "location": "89:20:4",
-      "line": 13,
+      "line": 14,
       "arabic": "جَمًّۭا",
       "kind": "word",
-      "index_on_page": 91,
+      "index_on_page": 106,
       "translation": "огромной."
     },
     {
@@ -1102,10 +1297,10 @@
       "ayah": 21,
       "position": 1,
       "location": "89:21:1",
-      "line": 13,
+      "line": 14,
       "arabic": "كَلَّآ",
       "kind": "word",
-      "index_on_page": 92,
+      "index_on_page": 107,
       "translation": "Так нет!"
     },
     {
@@ -1114,10 +1309,10 @@
       "ayah": 21,
       "position": 2,
       "location": "89:21:2",
-      "line": 13,
+      "line": 14,
       "arabic": "إِذَا",
       "kind": "word",
-      "index_on_page": 93,
+      "index_on_page": 108,
       "translation": "Когда"
     },
     {
@@ -1126,10 +1321,10 @@
       "ayah": 21,
       "position": 3,
       "location": "89:21:3",
-      "line": 13,
+      "line": 15,
       "arabic": "دُكَّتِ",
       "kind": "word",
-      "index_on_page": 94,
+      "index_on_page": 109,
       "translation": "будет разбита"
     },
     {
@@ -1138,10 +1333,10 @@
       "ayah": 21,
       "position": 4,
       "location": "89:21:4",
-      "line": 13,
+      "line": 15,
       "arabic": "ٱلْأَرْضُ",
       "kind": "word",
-      "index_on_page": 95,
+      "index_on_page": 110,
       "translation": "земля"
     },
     {
@@ -1150,10 +1345,10 @@
       "ayah": 21,
       "position": 5,
       "location": "89:21:5",
-      "line": 13,
+      "line": 15,
       "arabic": "دَكًّۭا",
       "kind": "word",
-      "index_on_page": 96,
+      "index_on_page": 111,
       "translation": "в прах"
     },
     {
@@ -1162,10 +1357,10 @@
       "ayah": 21,
       "position": 6,
       "location": "89:21:6",
-      "line": 14,
+      "line": 15,
       "arabic": "دَكًّۭا",
       "kind": "word",
-      "index_on_page": 97,
+      "index_on_page": 112,
       "translation": "в прах,"
     },
     {
@@ -1174,11 +1369,13 @@
       "ayah": 22,
       "position": 1,
       "location": "89:22:1",
-      "line": 14,
+      "line": 15,
       "arabic": "وَجَآءَ",
       "kind": "word",
-      "index_on_page": 98,
-      "translation": "и придёт"
+      "index_on_page": 113,
+      "translation": "и придёт",
+      "aqidah_note": "В матуридитском вероубеждении тексты о приходе Аллаха нельзя понимать как перемещение тела из одного места в другое или изменение пространственного положения. Аллах не подобен творениям и не нуждается в месте.",
+      "aqidah_category": "coming"
     },
     {
       "page": 593,
@@ -1186,10 +1383,10 @@
       "ayah": 22,
       "position": 2,
       "location": "89:22:2",
-      "line": 14,
+      "line": 15,
       "arabic": "رَبُّكَ",
       "kind": "word",
-      "index_on_page": 99,
+      "index_on_page": 114,
       "translation": "твой Господь"
     },
     {
@@ -1198,10 +1395,10 @@
       "ayah": 22,
       "position": 3,
       "location": "89:22:3",
-      "line": 14,
+      "line": 15,
       "arabic": "وَٱلْمَلَكُ",
       "kind": "word",
-      "index_on_page": 100,
+      "index_on_page": 115,
       "translation": "и ангелы"
     },
     {
@@ -1210,10 +1407,10 @@
       "ayah": 22,
       "position": 4,
       "location": "89:22:4",
-      "line": 14,
+      "line": 15,
       "arabic": "صَفًّۭا",
       "kind": "word",
-      "index_on_page": 101,
+      "index_on_page": 116,
       "translation": "рядами"
     },
     {
@@ -1222,119 +1419,11 @@
       "ayah": 22,
       "position": 5,
       "location": "89:22:5",
-      "line": 14,
+      "line": 15,
       "arabic": "صَفًّۭا",
       "kind": "word",
-      "index_on_page": 102,
+      "index_on_page": 117,
       "translation": "рядами,"
-    },
-    {
-      "page": 593,
-      "surah": 89,
-      "ayah": 23,
-      "position": 1,
-      "location": "89:23:1",
-      "line": 15,
-      "arabic": "وَجِا۟ىٓءَ",
-      "kind": "word",
-      "index_on_page": 103,
-      "translation": "и будет приведена"
-    },
-    {
-      "page": 593,
-      "surah": 89,
-      "ayah": 23,
-      "position": 2,
-      "location": "89:23:2",
-      "line": 15,
-      "arabic": "يَوْمَئِذٍۭ",
-      "kind": "word",
-      "index_on_page": 104,
-      "translation": "в тот день"
-    },
-    {
-      "page": 593,
-      "surah": 89,
-      "ayah": 23,
-      "position": 3,
-      "location": "89:23:3",
-      "line": 15,
-      "arabic": "بِجَهَنَّمَ ۚ",
-      "kind": "word",
-      "index_on_page": 105,
-      "translation": "Геенна."
-    },
-    {
-      "page": 593,
-      "surah": 89,
-      "ayah": 23,
-      "position": 4,
-      "location": "89:23:4",
-      "line": 15,
-      "arabic": "يَوْمَئِذٍ",
-      "kind": "word",
-      "index_on_page": 106,
-      "translation": "В тот день"
-    },
-    {
-      "page": 593,
-      "surah": 89,
-      "ayah": 23,
-      "position": 5,
-      "location": "89:23:5",
-      "line": 15,
-      "arabic": "يَتَذَكَّرُ",
-      "kind": "word",
-      "index_on_page": 107,
-      "translation": "вспомнит"
-    },
-    {
-      "page": 593,
-      "surah": 89,
-      "ayah": 23,
-      "position": 6,
-      "location": "89:23:6",
-      "line": 15,
-      "arabic": "ٱلْإِنسَـٰنُ",
-      "kind": "word",
-      "index_on_page": 108,
-      "translation": "человек,"
-    },
-    {
-      "page": 593,
-      "surah": 89,
-      "ayah": 23,
-      "position": 7,
-      "location": "89:23:7",
-      "line": 15,
-      "arabic": "وَأَنَّىٰ",
-      "kind": "word",
-      "index_on_page": 109,
-      "translation": "но откуда"
-    },
-    {
-      "page": 593,
-      "surah": 89,
-      "ayah": 23,
-      "position": 8,
-      "location": "89:23:8",
-      "line": 15,
-      "arabic": "لَهُ",
-      "kind": "word",
-      "index_on_page": 110,
-      "translation": "ему"
-    },
-    {
-      "page": 593,
-      "surah": 89,
-      "ayah": 23,
-      "position": 9,
-      "location": "89:23:9",
-      "line": 15,
-      "arabic": "ٱلذِّكْرَىٰ",
-      "kind": "word",
-      "index_on_page": 111,
-      "translation": "напоминание?"
     }
   ],
   "diagnostics": {

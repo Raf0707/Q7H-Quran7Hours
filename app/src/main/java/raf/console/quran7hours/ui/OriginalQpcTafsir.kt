@@ -119,11 +119,9 @@ internal class OriginalQpcTafsirRepository(context: Context) {
                 verse.surah == 1 && verse.ayah in 6..7 -> 7
                 else -> verse.ayah
             }
-            // The application bundles a classic (1405H) page-layout JSON while
-            // the QCF V2/V4 page fonts follow the newer (1440H) pagination.
-            // For 5:77 the GLYPHS are stored in page-121.json, but those glyph
-            // codes are defined in p120.ttf. Always search the index for the
-            // source words; a font-page override must never change the data page.
+            // All QPC layout JSON files now match the physical QCF V2/V4
+            // page fonts. Resolve the source words by their canonical page;
+            // never apply an ayah-specific font/page override.
             val pages = index[verseId(verse.surah, qpcAyah)].orEmpty()
             if (pages.isEmpty()) {
                 Log.w(LOG_TAG, "No verified QPC layout for ${verse.surah}:${verse.ayah} (QPC $qpcAyah)")
@@ -141,52 +139,6 @@ internal class OriginalQpcTafsirRepository(context: Context) {
                 Log.w(LOG_TAG, "Incomplete QPC words for ${verse.surah}:$qpcAyah")
                 continue
             }
-            if (verse.surah == 5 && verse.ayah == 77) {
-                // QCF page-font correction for the old Mushaf layout: all 23
-                // word codes U+FCCF..U+FCE5 (and the verse-end U+FCE6) are
-                // present in p120.ttf, not p121.ttf. Check the EXACT sequence
-                // before assigning that font to protect against incompatible
-                // layout packs. Do not alter Arabic words or glyph codes.
-                val correctCodes = canonicalWords.size == 23 &&
-                    canonicalWords.all { it.page == 121 } &&
-                    canonicalWords.first().glyphs.firstOrNull() == '\uFCCF' &&
-                    canonicalWords.last().glyphs.contains('\uFCE5') &&
-                    canonicalWords.last().glyphs.contains('\uFCE6')
-                if (!correctCodes) {
-                    Log.e(LOG_TAG, "5:77: unexpected classic-layout QPC codes, refuse mismatched font; " +
-                        "sourcePages=${canonicalWords.map { it.page }.distinct()}, words=${canonicalWords.size}")
-                    continue
-                }
-            }
-            // Some verses that start at a page boundary in the old/classic
-            // Mushaf layout share QCF codes with the *previous* QCF V2/V4
-            // font page. The layout JSON remains the source of the words;
-            // only the Typeface page is overridden after exact verification.
-            // Each QCF page reuses the same Unicode private-use codepoints:
-            // never choose a font merely because it contains a codepoint.
-            val rahmanFontPage: Int? = if (verse.surah == 55) {
-                val glyphs = canonicalWords.map { it.glyphs }
-                val expected: List<String>? = when (verse.ayah) {
-                    // page-533.json -> p532.ttf (55:41)
-                    41 -> listOf("\uFCD0", "\uFCD1", "\uFCD2", "\uFCD3", "\uFCD4", "\uFCD5 \uFCD6")
-                    // page-534.json -> p533.ttf (55:68 and 55:69)
-                    68 -> listOf("\uFCCB", "\uFCCC", "\uFCCD", "\uFCCE \uFCCF")
-                    69 -> listOf("\uFCD0", "\uFCD1", "\uFCD2", "\uFCD3 \uFCD4")
-                    else -> null
-                }
-                if (expected == null) null else {
-                    val sourcePage = if (verse.ayah == 41) 533 else 534
-                    if (canonicalWords.all { it.page == sourcePage } && glyphs == expected) {
-                        sourcePage - 1
-                    } else {
-                        // Never render these glyphs with an unrelated QCF page.
-                        Log.e(LOG_TAG, "55:${verse.ayah}: unexpected boundary glyphs; " +
-                            "sourcePages=${canonicalWords.map { it.page }.distinct()}, " +
-                            "wordCount=${glyphs.size}; Unicode fallback")
-                        continue
-                    }
-                }
-            } else null
             val words: List<OriginalQpcWord> = if (verse.surah == 1 && verse.ayah in 6..7) {
                 // Explicit Hanafi 1:6 = four words, 1:7 = five words.
                 if (canonicalWords.size != 9 ||
@@ -206,13 +158,8 @@ internal class OriginalQpcTafsirRepository(context: Context) {
             val parts = ArrayList<OriginalQpcPart>()
             for (word in words) {
                 if (word.glyphs.isBlank()) continue
-                // Source: classic layout page-121.json; QCF font: p120.ttf.
-                // Other verses keep their existing source-page/font mapping.
-                val fontPage = when {
-                    verse.surah == 5 && verse.ayah == 77 -> 120
-                    rahmanFontPage != null -> rahmanFontPage
-                    else -> word.page
-                }
+                // The glyph and its actual physical QPC page always agree.
+                val fontPage = word.page
                 // In the source layout, the star is identified by the readable
                 // word text "۞ ...", NOT by a fixed QPC character code. Every
                 // page reuses U+FC41, so relying on its code would also pad
@@ -237,15 +184,6 @@ internal class OriginalQpcTafsirRepository(context: Context) {
                 }
             }
             if (parts.isNotEmpty()) {
-                if (verse.surah == 5 && verse.ayah == 77) {
-                    Log.i(LOG_TAG, "5:77: source=page-121.json, font=p120.ttf, " +
-                        "sourceWords=${words.size}, QCF glyphs=${parts.sumOf { it.glyphs.length }}")
-                }
-                if (rahmanFontPage != null) {
-                    Log.i(LOG_TAG, "55:${verse.ayah}: QPC layout page=" +
-                        "${canonicalWords.first().page}, QCF font=p$rahmanFontPage.ttf " +
-                        "(${if (rahmanFontPage == 532) "55:41" else "55:68/69"})")
-                }
                 result[key] = OriginalQpcAyah(parts)
             }
         }
@@ -437,8 +375,8 @@ private object QpcSharedFonts {
  * Unified QPC renderer shared by Hafiz Diary and Tafsir.
  * The adjustable renderer loads the actual page-specific font as the TextView
  * base, and selects the built-in dark V4 palette while preserving color tajweed
- * and decorative verse-number ornaments. This also preserves the verified
- * 5:77 source-page-121 / font-page-120 mapping from this repository.
+ * and decorative verse-number ornaments. Exact physical page selection
+ * now comes directly from the corrected QPC layout assets.
  */
 @Composable
 internal fun OriginalQpcTafsirText(
