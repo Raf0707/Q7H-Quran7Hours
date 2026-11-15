@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -16,12 +17,19 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import raf.console.quran7hours.data.Q7HSurahTitles
+import kotlin.math.roundToInt
 import raf.console.quran7hours.data.CatalogDetails
 import raf.console.quran7hours.data.QuranCatalog
 import raf.console.quran7hours.data.QuranNavigationIndex
@@ -83,7 +91,7 @@ private fun nodeTitle(node: NavNode, mode: String): String = when (node.kind) {
         if (mode == "juz") "Четверть ${(node.number-1)%4+1}/4 · Хизб ${(node.number-1)/2+1}, ${(node.number-1)%2+1}/2"
         else "Половина ${(node.number-1)%2+1}/2 · Хизб ${(node.number-1)/2+1}"
     }
-    NavKind.SURAH -> "${node.number}. ${QuranCatalog.surahNames[node.number-1]}"
+    NavKind.SURAH -> "Сура ${node.number}. ${QuranCatalog.surahNames[node.number-1]}"
     NavKind.PAGE -> "Страница ${node.number}"
 }
 
@@ -196,8 +204,31 @@ private fun NavigationNodeRow(
                 Column(Modifier.weight(1f)) {
                     Text(nodeTitle(node,mode), style=MaterialTheme.typography.bodyMedium,
                         fontWeight=if (active) FontWeight.Bold else FontWeight.Medium)
-                    Text(details,style=MaterialTheme.typography.labelSmall,
-                        color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (node.kind == NavKind.SURAH) {
+                        Text(Q7HSurahTitles.translation(node.number),
+                            style=MaterialTheme.typography.bodySmall,
+                            color=MaterialTheme.colorScheme.onSurfaceVariant)
+                        val firstPage by produceState<Int?>(null, node.number, pages) {
+                            value = pages.pageOf(Ref(node.number,1))
+                        }
+                        val lastPage by produceState<Int?>(null, node.number, pages) {
+                            value = pages.pageOf(Ref(node.number,QuranCatalog.ayahCounts[node.number-1]))
+                        }
+                        Text("${Q7HSurahTitles.countLabel(QuranCatalog.ayahCounts[node.number-1])} · " +
+                            "стр. ${firstPage ?: "…"}–${lastPage ?: "…"}",
+                            style=MaterialTheme.typography.labelSmall,
+                            color=MaterialTheme.colorScheme.onSurfaceVariant)
+                        val sajdas = remember(node.number) {
+                            QuranNavigationIndex.sajdaTilawah.filter { it.surah == node.number }
+                        }
+                        if (sajdas.isNotEmpty()) Text(
+                            "Саджда-тилява: ${sajdas.joinToString { "после ${it.surah}:${it.ayah}" }}",
+                            style=MaterialTheme.typography.labelSmall,
+                            color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        Text(details,style=MaterialTheme.typography.labelSmall,
+                            color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
                 if (next != null) {
                     IconButton(onClick={expanded[node.key]=!isExpanded}) {
@@ -329,13 +360,47 @@ internal fun PageJumpDialog(
     val preview by produceState("Загрузка сведений…",selectedPage,pages){
         value=selectedPage?.let{pages.summary(it)} ?: "Введите допустимое значение"
     }
+    // Prepare a MAXIMUM natural-height preview once. Keeping an invisible copy
+    // in the layout reserves exactly the height needed for the largest real
+    // multi-surah summary; dragging never changes AlertDialog's measured height.
+    val maximumPreview by produceState(
+        "Сура 112. Аль-Ихляс · аяты 1–4\nСура 113. Аль-Фаляк · аяты 1–5\n" +
+            "Сура 114. Ан-Нас · аяты 1–6\nДжуз 30, 4/4 · Хизб 60, 2/2 · Манзиль 7",
+        pages
+    ) {
+        value = withContext(Dispatchers.IO) {
+            // A suspend function cannot be invoked from Sequence.mapNotNull's
+            // non-suspending lambda. Iterate directly in the coroutine instead.
+            var longest: String? = null
+            var mostLines = -1
+            var mostChars = -1
+            for (n in 1..604) {
+                val candidate = try {
+                    pages.summary(n)
+                } catch (e: java.util.concurrent.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    continue
+                }
+                val lines = candidate.count { ch -> ch == '\n' }
+                if (lines > mostLines || (lines == mostLines && candidate.length > mostChars)) {
+                    longest = candidate
+                    mostLines = lines
+                    mostChars = candidate.length
+                }
+            }
+            longest ?: value
+        }
+    }
     val modes=listOf("ayah" to "Аят","page" to "Страница","juz" to "Джуз",
         "hizb" to "Хизб","manzil" to "Манзиль")
     AlertDialog(
         onDismissRequest=onDismiss,
         title={Text("Перейти")},
         text={
-            Column(Modifier.fillMaxWidth().heightIn(max=530.dp),
+            Column(Modifier.fillMaxWidth().heightIn(max=530.dp).then(
+                if (mode == "ayah" || mode == "page") Modifier.verticalScroll(rememberScrollState())
+                else Modifier),
                 verticalArrangement=Arrangement.spacedBy(10.dp)) {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                     SingleChoiceSegmentedButtonRow(Modifier.width(475.dp)) {
@@ -354,22 +419,47 @@ internal fun PageJumpDialog(
                             {"$it. ${QuranCatalog.surahNames[it-1]}"}){
                             surah=it; ayah=1; explicitlySelected=true
                         }
+                        Q7HDiscreteNavigationSlider(
+                            value = surah, total = 114, label = "Сура",
+                            directionKey = Q7HSliderKeys.NAV_SURAH,
+                            onValue = { selected ->
+                                if (surah != selected) {
+                                    surah = selected
+                                    ayah = 1
+                                    explicitlySelected = true
+                                }
+                            }
+                        )
                         NavigationNumberDropdown("Аят",ayah,QuranCatalog.ayahCounts[surah-1],
                             {"Аят $it"}){ayah=it; explicitlySelected=true}
+                        Q7HDiscreteNavigationSlider(
+                            value = ayah,
+                            total = QuranCatalog.ayahCounts[surah - 1],
+                            label = "Аят",
+                            directionKey = Q7HSliderKeys.NAV_AYAH,
+                            onValue = { selected -> ayah = selected; explicitlySelected = true }
+                        )
                         Text("Страница: ${ayahPage ?: "…"}",fontWeight=FontWeight.SemiBold)
                         val selectedPosition = QuranNavigationIndex.position(Ref(surah,ayah))
                         Text("Выбранный аят: Джуз ${selectedPosition.juz}, ${selectedPosition.juzQuarter}/4 · " +
                             "Хизб ${selectedPosition.hizb}, ${selectedPosition.hizbHalf}/2" +
                             (ayahPage?.let { " · Манзиль ${pages.v4.segmentForPage(QuranCatalog.Segment.MANZIL,it)}" } ?: ""),
                             style=MaterialTheme.typography.bodySmall)
-                        Text(preview,style=MaterialTheme.typography.bodySmall)
+                        Q7HStableNavigationPreview(preview, maximumPreview)
                     }
                     "page" -> {
                         OutlinedTextField(value=input,onValueChange={input=it.filter(Char::isDigit).take(3)},
                             modifier=Modifier.fillMaxWidth(),label={Text("Страница (1–604)")},
                             singleLine=true,isError=page==null,
                             keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number))
-                        Text(preview,style=MaterialTheme.typography.bodySmall)
+                        Q7HDiscreteNavigationSlider(
+                            value = page ?: initialPage,
+                            total = 604,
+                            label = "Страница",
+                            directionKey = Q7HSliderKeys.NAV_PAGE,
+                            onValue = { input = it.toString() }
+                        )
+                        Q7HStableNavigationPreview(preview, maximumPreview)
                     }
                     "juz","hizb","manzil" -> {
                         val kind=when(mode){"juz"->NavKind.JUZ;"hizb"->NavKind.HIZB;else->NavKind.MANZIL}
@@ -397,6 +487,59 @@ internal fun PageJumpDialog(
         },
         dismissButton={TextButton(onClick=onDismiss){Text("Отмена")}}
     )
+}
+
+
+/** The reference participates in measurement, but remains invisible. */
+@Composable
+private fun Q7HStableNavigationPreview(text: String, maximum: String) {
+    Box(Modifier.fillMaxWidth()) {
+        Text(maximum, color=Color.Transparent, style=MaterialTheme.typography.bodySmall,
+            modifier=Modifier.fillMaxWidth())
+        Text(text,style=MaterialTheme.typography.bodySmall,
+            modifier=Modifier.fillMaxWidth().align(Alignment.TopStart))
+    }
+}
+
+/** Direction, arrows, and tick order are controlled by this slider's own setting. */
+@Composable
+private fun Q7HDiscreteNavigationSlider(
+    value: Int,
+    total: Int,
+    label: String,
+    directionKey: String,
+    onValue: (Int) -> Unit
+) {
+    val context = LocalContext.current
+    val prefs = remember(context.applicationContext) { Q7HSliderDirections.get(context.applicationContext) }
+    val rtl = prefs.rtl(directionKey)
+    val direction = if (rtl) LayoutDirection.Rtl else LayoutDirection.Ltr
+    val safeTotal = total.coerceAtLeast(1)
+    val number = value.coerceIn(1, safeTotal)
+    Column(Modifier.fillMaxWidth()) {
+        CompositionLocalProvider(LocalLayoutDirection provides direction) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                IconButton(onClick = { onValue((number - 1).coerceAtLeast(1)) }, enabled = number > 1) {
+                    Icon(if (rtl) Icons.Default.ChevronRight else Icons.Default.ChevronLeft,
+                        contentDescription = "$label: предыдущий")
+                }
+                Slider(
+                    value = number.toFloat(),
+                    onValueChange = { onValue(it.roundToInt().coerceIn(1, safeTotal)) },
+                    valueRange = 1f..safeTotal.coerceAtLeast(2).toFloat(),
+                    steps = (safeTotal - 2).coerceAtLeast(0),
+                    enabled = safeTotal > 1,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = { onValue((number + 1).coerceAtMost(safeTotal)) }, enabled = number < safeTotal) {
+                    Icon(if (rtl) Icons.Default.ChevronLeft else Icons.Default.ChevronRight,
+                        contentDescription = "$label: следующий")
+                }
+            }
+        }
+        Text("$label $number из $safeTotal", style = MaterialTheme.typography.labelSmall,
+            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+    }
 }
 
 @Composable

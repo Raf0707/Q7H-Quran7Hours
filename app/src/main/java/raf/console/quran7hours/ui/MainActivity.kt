@@ -66,6 +66,13 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowCompat.getInsetsController(window, window.decorView)
             .hide(WindowInsetsCompat.Type.statusBars())
+        // Restore validated user data BEFORE opening any preferences or SQLite databases.
+        // If restoration fails, Q7HBackupManager restores the pre-import files.
+        try {
+            Q7HBackupManager.applyPendingRestore(this)
+        } catch (error: Exception) {
+            Log.e("Q7HBackup", "Cannot restore pending backup", error)
+        }
         setContent { Quran7HoursScreen(this) }
     }
 }
@@ -111,7 +118,6 @@ private fun Quran7HoursScreen(activity: MainActivity) {
     val mushaf = remember { MushafStore(context) }
     val learningDb = remember { LearningDatabase(context).also { it.migrateLegacyBookmarks() } }
     val catalogDetails = remember { CatalogDetails(context) }
-    val v4Navigation = remember(context.applicationContext) { QuranV4PageCatalog(context.applicationContext) }
     val tafsir = remember { TafsirStore(context) }
     val quranScript = remember { TafsirQuranScript(context) }
     val wordStore = remember { WordByWordStore(context) }
@@ -131,6 +137,13 @@ private fun Quran7HoursScreen(activity: MainActivity) {
 
     // The displayed sheet is nullable; the selected section is independent and persistent.
     var sheet by remember { mutableStateOf<SheetSection?>(null) }
+    val sheetVisibility=remember(context.applicationContext){
+        SharedQ7HSheetVisibility.get(context.applicationContext)
+    }
+    val visibleSections=listOf(
+        SheetSection.AUDIO to "Аудио",SheetSection.TAFSIR to "Тафсир",
+        SheetSection.HAFIZ to "Дневник хафиза",SheetSection.SETTINGS to "Настройки"
+    ).filter { sheetVisibility.value.includes(it.first) }
     var preferredSheet by remember {
         mutableStateOf(SheetSection.entries.firstOrNull { it.name == prefs.lastSheetSection }
             ?: SheetSection.AUDIO)
@@ -164,10 +177,17 @@ private fun Quran7HoursScreen(activity: MainActivity) {
     var clearInkDialog by remember { mutableStateOf(false) }
     var showToolbarPageJump by rememberSaveable { mutableStateOf(false) }
     var drawerTab by remember { mutableStateOf(DrawerSection.CONTENTS) }
+    var notesSegment by remember { mutableIntStateOf(0) }
+    var bookmarkSegment by remember { mutableIntStateOf(0) }
     var drawerSegment by remember { mutableStateOf(QuranCatalog.Segment.SURAH) }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val pager = rememberPagerState(initialPage = prefs.lastPage - 1, pageCount = { QuranCatalog.TOTAL_PAGES })
     val page = pager.currentPage + 1
+    LaunchedEffect(page) { QpcPreparedPages.start(context.applicationContext,tafsir,page) }
+    LaunchedEffect(sheetVisibility.value) {
+        if(sheet!=null && !sheetVisibility.value.includes(sheet!!)) sheet=SheetSection.SETTINGS
+        if(!sheetVisibility.value.includes(preferredSheet)) preferredSheet=SheetSection.SETTINGS
+    }
     // The exact same stroke list is shared by the active page and its pager leaf.
     // This prevents the previous page from losing its covers midway through a swipe.
     val inkPageCache = remember(learningDb) {
@@ -221,7 +241,8 @@ private fun Quran7HoursScreen(activity: MainActivity) {
     // Load the HTTPS-only reciter list only while Tafsir is visible. A cancelled request
     // (the user closes the sheet) can be retried upon reopening.
     LaunchedEffect(sheet) {
-        if (sheet != SheetSection.TAFSIR || recitersRequested || reciters.isNotEmpty()) return@LaunchedEffect
+        if ((sheet != SheetSection.TAFSIR && sheet != SheetSection.HAFIZ) ||
+            recitersRequested || reciters.isNotEmpty()) return@LaunchedEffect
         recitersRequested = true
         try {
             ReciterRepository().list().fold(
@@ -404,7 +425,7 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                             segment = drawerSegment, onSegment = { drawerSegment = it }, currentPage = page,
                             highlightedSurah = playingSurah, descriptions = catalogDetails,
                             onClick = { segment, index ->
-                                goToPage(v4Navigation.startPages(segment).getOrNull(index - 1) ?: 1)
+                                goToPage(QuranCatalog.startPages(segment).getOrNull(index - 1) ?: 1)
                                 scope.launch { drawerState.close() }
                             },
                             onJumpAyah = { surah, ayah ->
@@ -412,20 +433,60 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                 scope.launch { drawerState.close() }
                             }
                         )
-                        DrawerSection.BOOKMARKS -> LearningBookmarksDetailedDrawer(
-                            bookmarks = bookmarks,
-                            onOpen = { goToPage(it); scope.launch { drawerState.close() } },
-                            onRemove = { id ->
-                                learningDb.removeBookmark(id)
-                                bookmarks = learningDb.bookmarks()
-                                learningNotes = learningDb.notes()
-                            },
-                            onNote = { mark ->
-                                noteEditor = LearningNote(scope = NoteScope.PAGE,
-                                    number = mark.page, bookmarkId = mark.id)
+                        DrawerSection.BOOKMARKS -> Column(Modifier.fillMaxSize()) {
+                            SingleChoiceSegmentedButtonRow(
+                                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                listOf("Страницы", "Аяты").forEachIndexed { index, title ->
+                                    SegmentedButton(
+                                        selected = bookmarkSegment == index,
+                                        onClick = { bookmarkSegment = index },
+                                        shape = SegmentedButtonDefaults.itemShape(index, 2)
+                                    ) { Text(title) }
+                                }
                             }
-                        )
-                        DrawerSection.NOTES -> LearningNotesDrawer(
+                            if (bookmarkSegment == 0) LearningBookmarksDetailedDrawer(
+                                bookmarks = bookmarks,
+                                onOpen = { goToPage(it); scope.launch { drawerState.close() } },
+                                onRemove = { id ->
+                                    // Detach notes first; deleting a bookmark never deletes notes.
+                                    learningNotes.filter { it.bookmarkId == id }.forEach { note ->
+                                        learningDb.saveNote(note.copy(
+                                            bookmarkId = null,
+                                            scope = if(note.scope == NoteScope.NONE) NoteScope.PAGE else note.scope,
+                                            number = if(note.scope == NoteScope.NONE) bookmarks.firstOrNull { it.id == id }?.page ?: note.number else note.number
+                                        ))
+                                    }
+                                    learningDb.removeBookmark(id)
+                                    bookmarks = learningDb.bookmarks()
+                                    learningNotes = learningDb.notes()
+                                },
+                                onNote = { mark ->
+                                    noteEditor = learningNotes.firstOrNull { it.bookmarkId == mark.id }
+                                        ?: LearningNote(scope = NoteScope.PAGE, number = mark.page,
+                                            bookmarkId = mark.id)
+                                }
+                            ) else Q7HAyahBookmarksDrawer(
+                                onOpen = { s, a ->
+                                    goToAyah(s, a)
+                                    scope.launch { drawerState.close() }
+                                },
+                                onNote = { s, a ->
+                                    noteEditor = learningNotes.firstOrNull {
+                                        it.scope == NoteScope.AYAH && it.surah == s && it.firstAyah == a
+                                    } ?: LearningNote(scope = NoteScope.AYAH, surah = s,
+                                        firstAyah = a, lastAyah = a)
+                                }
+                            )
+                        }
+                        DrawerSection.NOTES -> Column(Modifier.fillMaxSize()) {
+                            TabRow(selectedTabIndex=notesSegment) {
+                                Tab(selected=notesSegment==0,onClick={notesSegment=0},
+                                    text={Text("Текстовые")})
+                                Tab(selected=notesSegment==1,onClick={notesSegment=1},
+                                    text={Text("Графические")})
+                            }
+                            if (notesSegment==0) LearningNotesDrawer(
                             notes = learningNotes, bookmarks = bookmarks,
                             onCreate = { noteEditor = LearningNote(scope = NoteScope.PAGE, number = page) },
                             onEdit = { noteEditor = it },
@@ -436,17 +497,21 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                 } else {
                                     val target = when (note.scope) {
                                         NoteScope.PAGE -> note.number
-                                        NoteScope.SURAH -> v4Navigation.startPages(QuranCatalog.Segment.SURAH).getOrNull(note.number - 1)
-                                        NoteScope.JUZ -> v4Navigation.startPages(QuranCatalog.Segment.JUZ).getOrNull(note.number - 1)
-                                        NoteScope.HIZB -> v4Navigation.startPages(QuranCatalog.Segment.HIZB).getOrNull(note.number - 1)
-                                        NoteScope.MANZIL -> v4Navigation.startPages(QuranCatalog.Segment.MANZIL).getOrNull(note.number - 1)
+                                        NoteScope.SURAH -> QuranCatalog.surahPages.getOrNull(note.number - 1)
+                                        NoteScope.JUZ -> QuranCatalog.juzPages.getOrNull(note.number - 1)
+                                        NoteScope.HIZB -> QuranCatalog.hizbPages.getOrNull(note.number - 1)
+                                        NoteScope.MANZIL -> QuranCatalog.manzilPages.getOrNull(note.number - 1)
                                         else -> bookmarks.firstOrNull { it.id == note.bookmarkId }?.page
                                     }
                                     if (target != null) goToPage(target)
                                 }
                                 scope.launch { drawerState.close() }
                             }
-                        )
+                            ) else Q7HGraphicNotesDrawer(db=learningDb,onOpenGraphic={ graphicPage ->
+                                goToPage(graphicPage)
+                                scope.launch { drawerState.close() }
+                            })
+                        }
                     }
                 }
             }
@@ -471,7 +536,18 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                         val leafPage = index + 1
                         val leafStrokes = remember(leafPage) { strokesForPage(leafPage) }
                         val bitmap by produceState<android.graphics.Bitmap?>(null, index, variant) {
-                            value = mushaf.load(index + 1, variant)
+                            // An asset pack may finish extracting AFTER this page first appears.
+                            // Do not permanently render "missing page" after one failed lookup.
+                            var retryDelay = 800L
+                            while (true) {
+                                val loaded = mushaf.load(index + 1, variant)
+                                if (loaded != null) {
+                                    value = loaded
+                                    break
+                                }
+                                kotlinx.coroutines.delay(retryDelay)
+                                retryDelay = (retryDelay * 2L).coerceAtMost(30_000L)
+                            }
                         }
                         LaunchedEffect(bitmap, page, variant) {
                             if (index + 1 == page && bitmap != null) {
@@ -544,7 +620,7 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                     Icon(Icons.Default.MenuBook, null, modifier = Modifier.size(42.dp))
                                     Text("Страница ${index + 1}")
                                     Text(
-                                        "Не найдена ${"%03d".format(index + 1)} в ${mushaf.folderName(variant)}",
+                                        "Проверяю ${"%03d".format(index + 1)} в ${mushaf.folderName(variant)}. Повторная загрузка выполняется автоматически.",
                                         textAlign = TextAlign.Center
                                     )
                                 }
@@ -647,8 +723,16 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                         onDismiss = { bookmarkMenu = false },
                                         onToggle = { type ->
                                             val current = bookmarks.firstOrNull { it.page == page && it.typeId == type.id }
-                                            if (current != null) learningDb.removeBookmark(current.id)
-                                            else learningDb.addBookmark(page, type.id)
+                                            if (current != null) {
+                                                learningNotes.filter { it.bookmarkId == current.id }.forEach { note ->
+                                                    learningDb.saveNote(note.copy(
+                                                        bookmarkId = null,
+                                                        scope = if(note.scope == NoteScope.NONE) NoteScope.PAGE else note.scope,
+                                                        number = if(note.scope == NoteScope.NONE) current.page else note.number
+                                                    ))
+                                                }
+                                                learningDb.removeBookmark(current.id)
+                                            } else learningDb.addBookmark(page, type.id)
                                             bookmarks = learningDb.bookmarks()
                                             learningNotes = learningDb.notes()
                                             bookmarkMenu = false
@@ -659,6 +743,13 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                             // Remove all bookmarks attached to the CURRENT page;
                                             // bookmarks elsewhere and notes are left untouched.
                                             bookmarks.filter { it.page == page }.forEach { mark ->
+                                                learningNotes.filter { it.bookmarkId == mark.id }.forEach { note ->
+                                                    learningDb.saveNote(note.copy(
+                                                        bookmarkId = null,
+                                                        scope = if(note.scope == NoteScope.NONE) NoteScope.PAGE else note.scope,
+                                                        number = if(note.scope == NoteScope.NONE) mark.page else note.number
+                                                    ))
+                                                }
                                                 learningDb.removeBookmark(mark.id)
                                             }
                                             bookmarks = learningDb.bookmarks()
@@ -691,7 +782,8 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp)
                 ) {
                     Surface(
-                        onClick = { sheet = preferredSheet },
+                        onClick = { sheet = if (sheetVisibility.value.includes(preferredSheet))
+                            preferredSheet else SheetSection.SETTINGS },
                         modifier = Modifier.size(width = 52.dp, height = 28.dp),
                         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.96f),
                         shape = RoundedCornerShape(18.dp),
@@ -804,16 +896,14 @@ private fun Quran7HoursScreen(activity: MainActivity) {
             Column(Modifier.fillMaxWidth().fillMaxHeight(0.93f)) {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                     SingleChoiceSegmentedButtonRow(
-                        Modifier.width(530.dp).padding(horizontal = 8.dp, vertical = 5.dp)
+                        Modifier.width((visibleSections.size * 134).dp).padding(horizontal = 8.dp, vertical = 5.dp)
                     ) {
-                        listOf(SheetSection.AUDIO to "Аудио", SheetSection.TAFSIR to "Тафсир",
-                            SheetSection.HAFIZ to "Дневник хафиза", SheetSection.SETTINGS to "Настройки")
-                            .forEachIndexed { index, (target, title) ->
+                        visibleSections.forEachIndexed { index, (target, title) ->
                                 SegmentedButton(selected = sheet == target, onClick = {
                                     preferredSheet = target
                                     prefs.lastSheetSection = target.name
                                     sheet = target
-                                }, shape = SegmentedButtonDefaults.itemShape(index, 4)) {
+                                }, shape = SegmentedButtonDefaults.itemShape(index, visibleSections.size)) {
                                     Text(title, maxLines = 1, fontSize = 12.sp)
                                 }
                             }
@@ -842,10 +932,30 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                 hadrController?.play()
                             }
                         },
+                        onRangePlay = { segment, from, to, mode ->
+                            val start = timings.seekMs(segment,from)
+                            val finish = timings.seekMs(segment,to)
+                            val after = timings.seekMs(segment,to+1)
+                            val isLast = timings.marks(segment).lastOrNull()?.number == to
+                            if (start == null || finish == null ||
+                                (after == null && !isLast) ||
+                                (after != null && after <= start)) {
+                                notice = "Для этого отрезка не хватает корректных таймингов"
+                            } else if (Q7HRangeState.hadr(context,segment,from,to,mode)) {
+                                prefs.setHadrActiveSegment(segment.name,from)
+                                if (hadrSnapshot.mediaId != "hadr" || hadrSnapshot.error != null)
+                                    beginHadr(start)
+                                else if (hadrSnapshot.seekable) {
+                                    hadrController?.seekTo(HadrSeekPolicy.clampMs(start,hadrSnapshot.durationMs))
+                                    hadrController?.play()
+                                } else beginHadr(start)
+                            }
+                        },
                         onJump = { segment, index ->
                             val time = timings.seekMs(segment, index)
                             if (time == null) notice = "Тайминг ${segment.title.lowercase()} №$index пока не задан"
                             else {
+                                Q7HRangeState.clearHadr(context)
                                 prefs.setHadrActiveSegment(segment.name, index)
                                 if (hadrSnapshot.mediaId != "hadr" || hadrSnapshot.error != null) {
                                     beginHadr(time)
@@ -883,6 +993,31 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                             ayahConnection.setAyahEndMode(mode)
                         },
                         onPlayVerse = ::playVerse,
+                        onNoteAyah = { s, a ->
+                            noteEditor = learningNotes.firstOrNull {
+                                it.scope == NoteScope.AYAH && it.surah == s && it.firstAyah == a
+                            } ?: LearningNote(scope = NoteScope.AYAH, surah = s, firstAyah = a, lastAyah = a)
+                        },
+                        onPlayRange = { fromSurah, fromAyah, toSurah, toAyah, mode ->
+                            val intendedReciter = if (mode == AyahEndMode.ALL_RECITERS) {
+                                reciters.firstOrNull { it.repository == prefs.manuallySelectedReciter }
+                                    ?: reciters.firstOrNull {
+                                        it.repository.removePrefix("q7h_").lowercase() in
+                                            setOf("aymansowaid","aymansuwaid")
+                                    } ?: reciters.firstOrNull()
+                            } else {
+                                reciters.firstOrNull { it.repository == selectedReciter }
+                                    ?: reciters.firstOrNull()
+                            }
+                            if (intendedReciter == null || ayahController == null) {
+                                notice = "Плеер аятов или чтецы ещё не загружены"
+                            } else {
+                                ayahMode = mode
+                                prefs.ayahEndMode = mode.name
+                                ayahConnection.playAyahRange(intendedReciter,fromSurah,fromAyah,
+                                    toSurah,toAyah,mode)
+                            }
+                        },
                         onPlayPreface = { part: PrefacePart ->
                             if (ayahController == null) {
                                 notice = "Плеер аятов ещё подключается"
@@ -904,7 +1039,34 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                     )
                     SheetSection.HAFIZ -> HafizDiaryPanelEnhanced(
                         page = page, tafsir = tafsir, prefs = prefs, db = learningDb,
-                        tajweed = tajweed,
+                        tajweed = tajweed,wordStore=wordStore,
+                        playback=ayahSnapshot, controller=ayahController,
+                        reciters=reciters,reciterError=reciterError,
+                        selectedReciter=selectedReciter,
+                        onReciter={ chosen ->
+                            selectedReciter=chosen
+                            prefs.selectedReciter=chosen
+                            if(ayahSnapshot.playing && ayahSnapshot.mediaId.startsWith("ayah:")) {
+                                val parts=ayahSnapshot.mediaId.split(':')
+                                val reciter=reciters.firstOrNull { it.repository==chosen }
+                                if(parts.size>=3 && reciter!=null) {
+                                    val s=parts[1].toIntOrNull()
+                                    val a=parts[2].toIntOrNull()
+                                    if(s!=null && a!=null) ayahConnection.playAyah(reciter,s,a,ayahMode)
+                                }
+                            }
+                        },
+                        endMode=ayahMode,onEndMode={ next ->
+                            ayahMode=next
+                            prefs.ayahEndMode=next.name
+                            ayahConnection.setAyahEndMode(next)
+                        },
+                        onPlayVerse=::playVerse,
+                        onNoteAyah = { s, a ->
+                            noteEditor = learningNotes.firstOrNull {
+                                it.scope == NoteScope.AYAH && it.surah == s && it.firstAyah == a
+                            } ?: LearningNote(scope = NoteScope.AYAH, surah = s, firstAyah = a, lastAyah = a)
+                        },
                         onPrevious = { goToPage(page - 1) },
                         onNext = { goToPage(page + 1) }
                     )

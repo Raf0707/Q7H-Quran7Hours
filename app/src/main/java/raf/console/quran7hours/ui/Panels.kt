@@ -1,6 +1,4 @@
 package raf.console.quran7hours.ui
-
-
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.border
@@ -35,6 +33,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -55,6 +54,7 @@ import raf.console.quran7hours.data.TimingCatalog
 import raf.console.quran7hours.media.AyahEndMode
 import raf.console.quran7hours.media.Reciter
 import raf.console.quran7hours.media.PrefacePart
+import raf.console.quran7hours.media.Q7HRangeState
 import kotlin.math.roundToLong
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -83,7 +83,8 @@ fun AudioPanel(
     activeSurah: Int?,
     currentPage: Int,
     onPlay: () -> Unit,
-    onJump: (QuranCatalog.Segment, Int) -> Unit
+    onJump: (QuranCatalog.Segment, Int) -> Unit,
+    onRangePlay: (QuranCatalog.Segment, Int, Int, String) -> Unit
 ) {
     // Q7H_AUDIO_SCROLL_20261112: always open each category at its current mark.
     // Player snapshots arrive every ~450ms, but this effect only acts when the
@@ -102,9 +103,25 @@ fun AudioPanel(
             listState.scrollToItem(targetIndex)
         }
     }
+    var showHadrRange by remember { mutableStateOf(false) }
+    if (showHadrRange) {
+        Q7HHadrRangeDialog(category.title, marks.size, active,
+            onDismiss={showHadrRange=false},
+            onStart={from,to,mode ->
+                showHadrRange=false
+                onRangePlay(category,from,to,mode)
+            })
+    }
     Column(modifier = Modifier.fillMaxSize()) {
-        Text("Коран за 7 часов", style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(start = 16.dp, top = 10.dp, bottom = 8.dp))
+        Row(verticalAlignment=Alignment.CenterVertically,modifier=Modifier.fillMaxWidth()) {
+            Text("Коран за 7 часов",style=MaterialTheme.typography.titleLarge,
+                modifier=Modifier.weight(1f).padding(start=16.dp,top=10.dp,bottom=8.dp))
+            TextButton(onClick={showHadrRange=true}) {
+                Icon(Icons.Default.Tune,contentDescription=null)
+                Spacer(Modifier.width(4.dp))
+                Text("Отрезок")
+            }
+        }
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
             QuranCatalog.Segment.entries.forEachIndexed { index, value ->
                 SegmentedButton(
@@ -159,6 +176,7 @@ fun AudioPanel(
                         val canRepeatThisMark = time != null &&
                             (marks.getOrNull(number)?.positionMs != null || number == marks.lastOrNull()?.number)
                         IconButton(onClick = {
+                            Q7HRangeState.clearHadr(context)
                             endMode = when (endMode) {
                                 "NEXT" -> "REPEAT"
                                 "REPEAT" -> "REPEAT_N"
@@ -232,6 +250,13 @@ private fun HadrMiniPlayer(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 2
         )
+        val mainSliderContext = androidx.compose.ui.platform.LocalContext.current
+        val directionPrefs = remember(mainSliderContext.applicationContext) {
+            Q7HSliderDirections.get(mainSliderContext.applicationContext)
+        }
+        val mainRtl = directionPrefs.rtl(Q7HSliderKeys.HADR_MAIN)
+        CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides
+            if (mainRtl) androidx.compose.ui.unit.LayoutDirection.Rtl else androidx.compose.ui.unit.LayoutDirection.Ltr) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Text(timeLabel(if (dragging) raf.console.quran7hours.media.HadrSeekPolicy.fromFraction(proposed, duration)
                 else playback.positionMs), style = MaterialTheme.typography.labelSmall)
@@ -249,6 +274,8 @@ private fun HadrMiniPlayer(
             )
             Text(timeLabel(duration), style = MaterialTheme.typography.labelSmall)
         }
+        }
+        Q7HHadrSecondaryRangeSlider(playback, controller, timings)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { if (ready) controller?.seekTo(0L) }, enabled = ready) {
@@ -309,15 +336,20 @@ fun TafsirPanel(
     endMode: AyahEndMode,
     onEndMode: (AyahEndMode) -> Unit,
     onPlayVerse: (Int, Int) -> Unit,
+    onNoteAyah: (Int, Int) -> Unit,
+    onPlayRange: (Int, Int, Int, Int, AyahEndMode) -> Unit,
     onPlayPreface: (PrefacePart) -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit
 ) {
-    val readingPage by produceState<TafsirStore.ReadingPage?>(null, page) {
-        value = store.readingPage(page)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // The diary and Tafsir share ONE prepared QPC page (verses, introductions,
+    // page typefaces). No Unicode text is displayed while QPC is still loading.
+    val prepared by produceState<QpcPreparedPage?>(null, page, store) {
+        value = QpcPreparedPages.page(context.applicationContext, store, page)
     }
-    val verses = readingPage?.verses
-    val introductions = readingPage?.introductions.orEmpty()
+    val verses = prepared?.verses
+    val introductions = prepared?.introductions.orEmpty()
     // No expensive per-word parsing on the main/UI thread. The reader caches per-surah JSON.
     val dictionaries by produceState<Map<Pair<Int, Int>, List<WordByWordStore.Word>>>(
         emptyMap(), page, verses
@@ -331,7 +363,6 @@ fun TafsirPanel(
     }
     // Original QPC V4/V2 glyphs from the earlier Quran7Hours app.
     // These are page-specific fonts, not Unicode text colored with SpanStyle.
-    val context = androidx.compose.ui.platform.LocalContext.current
     val displayPreferences = remember(context.applicationContext) {
         SharedTafsirDisplayOptions.get(context.applicationContext)
     }
@@ -352,13 +383,27 @@ fun TafsirPanel(
             prefs.saveReciterOrder(reciters.map { it.repository to it.branch })
         }
     }
-    val originalQpc = remember(context) { OriginalQpcTafsirRepository(context) }
-    val qpcVerses by produceState<Map<Pair<Int, Int>, OriginalQpcAyah>>(
-        emptyMap(), page, verses
-    ) {
-        value = verses?.let { originalQpc.forPage(page, it) }.orEmpty()
-    }
+    val originalQpc = remember(context.applicationContext) { OriginalQpcTafsirRepository(context.applicationContext) }
+    val qpcVerses = prepared?.qpc.orEmpty()
+    val v4ForRange = remember(context.applicationContext) { QuranV4PageCatalog(context.applicationContext) }
+    val firstVerse = v4ForRange.first(page)
+    var showAyahRange by remember { mutableStateOf(false) }
+    if (showAyahRange) Q7HAyahRangeDialog(
+        firstVerse?.surah ?: 1, firstVerse?.ayah ?: 1,
+        onDismiss={showAyahRange=false},
+        onStart={s,a,es,ea,mode ->
+            showAyahRange=false
+            onPlayRange(s,a,es,ea,mode)
+        }
+    )
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
+        Row(modifier=Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.End) {
+            TextButton(onClick={showAyahRange=true}) {
+                Icon(Icons.Default.Tune,contentDescription=null)
+                Spacer(Modifier.width(5.dp))
+                Text("Отрезок аятов")
+            }
+        }
         if (tajweed && !originalQpc.isPackComplete()) {
             Text(
                 "Оригинальный QPC V4 не установлен. Для цветного таджвида запусти INSTALL_FROM_OLD.bat.",
@@ -446,7 +491,23 @@ fun TafsirPanel(
                                 selectedReciter = selectedReciter, onReciter = onReciter,
                                 prefs = prefs,
                                 endMode = endMode, onEndMode = onEndMode,
-                                onPlay = { onPlayVerse(verse.surah, verse.ayah) }
+                                onPlay = { onPlayVerse(verse.surah, verse.ayah) },
+                                playOnly = true
+                            )
+                            val verseWords = dictionaries[verse.surah to verse.ayah].orEmpty()
+                            Q7HAyahActions(
+                                content = Q7HVerseContent(
+                                    surah = verse.surah, ayah = verse.ayah,
+                                    arabic = verse.arabic, translation = verse.translation,
+                                    tafsir = verse.explanation,
+                                    dictionary = verseWords.joinToString("\n") { "${it.arabic} — ${it.translationRu}" },
+                                    showArabic = display.showArabic,
+                                    showDictionary = display.showDictionary,
+                                    showTranslation = display.showTranslation,
+                                    showTafsir = display.showTafsir,
+                                    order = display.blockOrder
+                                ),
+                                onNote = onNoteAyah
                             )
                         }
                         if (display.showArabic &&
@@ -468,6 +529,9 @@ fun TafsirPanel(
                                 )
                             }
                         }
+                        display.blockOrder.forEach { element ->
+                            when (element) {
+                                "dictionary" -> {
                         if (display.showDictionary) {
                             AyahWordDictionary(
                                 verse.surah, verse.ayah,
@@ -476,6 +540,8 @@ fun TafsirPanel(
                                 initiallyExpanded = dictionaryOnly
                             )
                         }
+                                }
+                                "translation" -> {
                         if (display.showTranslation && verse.translation.isNotBlank()) {
                             HorizontalDivider()
                             Q7HFootnoteText(
@@ -488,6 +554,8 @@ fun TafsirPanel(
                                 )
                             )
                         }
+                                }
+                                "tafsir" -> {
                         // Tafsir is only permitted together with the translation.
                         // Memorize formatted paragraphs across Media3 progress updates.
                         if (display.showTafsir && display.showTranslation) {
@@ -512,12 +580,27 @@ fun TafsirPanel(
                                 }
                             }
                         } // only show tafsir when its accompanying translation is enabled
+                                }
+                            }
+                        }
                     }
                 }
                 } // item(ayah)
             } // forEachIndexed
         }
     }
+        Q7HAyahSecondaryRangeSlider(playback)
+        val tafsirPlayerTarget = q7hAyahMiniTarget(verses.orEmpty(), playback)
+        if (tafsirPlayerTarget != null) {
+            Q7HAyahMiniPlayer(
+                target = tafsirPlayerTarget,
+                playback = playback, controller = controller, prefs = prefs,
+                reciters = reciters, reciterError = reciterError,
+                selectedReciter = selectedReciter, onReciter = onReciter,
+                endMode = endMode, onEndMode = onEndMode,
+                onPlayVerse = onPlayVerse
+            )
+        }
         // Fixed navigation bar: always accessible, even when the tafsir is very long.
         // Right-to-left Mushaf navigation: left = next page; right = previous page.
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -614,7 +697,7 @@ private fun Q7HSurahIntroductionCard(
 
 /** Word-by-word gloss, separate from the full translation and the Azan.ru tafsir. */
 @Composable
-private fun AyahWordDictionary(
+internal fun AyahWordDictionary(
     surah: Int,
     ayah: Int,
     words: List<WordByWordStore.Word>,
@@ -695,7 +778,7 @@ private fun AyahWordDictionary(
     }
 }
 @Composable
-private fun AyahAudioControls(
+internal fun AyahAudioControls(
     surah: Int,
     ayah: Int,
     playback: PlaybackSnapshot,
@@ -707,7 +790,11 @@ private fun AyahAudioControls(
     prefs: UserPreferences,
     endMode: AyahEndMode,
     onEndMode: (AyahEndMode) -> Unit,
-    onPlay: () -> Unit
+    onPlay: () -> Unit,
+    playOnly: Boolean = false,
+    miniMode: Boolean = false,
+    onPreviousVerse: (() -> Unit)? = null,
+    onNextVerse: (() -> Unit)? = null
 ) {
     val idParts = playback.mediaId.split(':')
     val isCurrent = idParts.size >= 3 && idParts[0] == "ayah" &&
@@ -746,6 +833,11 @@ private fun AyahAudioControls(
         }
         return suwaid ?: reciters.firstOrNull()
     }
+    val miniContext = LocalContext.current
+    val miniDirection = remember(miniContext.applicationContext) {
+        Q7HSliderDirections.get(miniContext.applicationContext)
+    }
+    val miniRtl = miniMode && miniDirection.rtl(Q7HSliderKeys.AYAH_MINI)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         IconButton(onClick = {
             // When the service has advanced to another reciter, pausing must NOT
@@ -766,13 +858,36 @@ private fun AyahAudioControls(
                 if (isCurrent && playback.playing) "Пауза аята $surah:$ayah" else "Слушать аят $surah:$ayah",
                 tint = MaterialTheme.colorScheme.primary)
         }
-        if (isCurrent) {
-            Slider(value = shownFraction, onValueChange = { fraction = it; dragging = true },
-                onValueChangeFinished = {
-                    if (duration > 0) controller?.seekTo((fraction * duration).roundToLong())
-                    dragging = false
-                }, enabled = duration > 0,
-                modifier = Modifier.width(86.dp))
+        if (playOnly) return@Row
+        if (miniMode) {
+            val first = if (miniRtl) onNextVerse else onPreviousVerse
+            if (first != null) IconButton(onClick = first, modifier = Modifier.size(36.dp)) {
+                Icon(if (miniRtl) Icons.Default.SkipNext else Icons.Default.SkipPrevious,
+                    contentDescription = if (miniRtl) "Следующий аят" else "Предыдущий аят")
+            }
+        }
+        if (isCurrent || miniMode) {
+            val sliderContext = androidx.compose.ui.platform.LocalContext.current
+            val sliderDirections = remember(sliderContext.applicationContext) {
+                Q7HSliderDirections.get(sliderContext.applicationContext)
+            }
+            CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides
+                if (sliderDirections.rtl(if (miniMode) Q7HSliderKeys.AYAH_MINI else Q7HSliderKeys.AYAH_MAIN)) androidx.compose.ui.unit.LayoutDirection.Rtl
+                else androidx.compose.ui.unit.LayoutDirection.Ltr) {
+                Slider(value = shownFraction, onValueChange = { fraction = it; dragging = true },
+                    onValueChangeFinished = {
+                        if (duration > 0) controller?.seekTo((fraction * duration).roundToLong())
+                        dragging = false
+                    }, enabled = duration > 0,
+                    modifier = Modifier.width(86.dp))
+            }
+            if (miniMode) {
+                val second = if (miniRtl) onPreviousVerse else onNextVerse
+                if (second != null) IconButton(onClick = second, modifier = Modifier.size(36.dp)) {
+                    Icon(if (miniRtl) Icons.Default.SkipPrevious else Icons.Default.SkipNext,
+                        contentDescription = if (miniRtl) "Предыдущий аят" else "Следующий аят")
+                }
+            }
             val nextMode = when (endMode) {
                 AyahEndMode.STOP -> AyahEndMode.REPEAT
                 AyahEndMode.REPEAT -> AyahEndMode.NEXT
@@ -1052,7 +1167,17 @@ fun SettingsPanel(
         val tafsirDisplay = remember(context.applicationContext) {
             SharedTafsirDisplayOptions.get(context.applicationContext)
         }
-        TafsirDisplaySettingsSection(tafsirDisplay)
+        val hafizDisplay = remember(context.applicationContext) {
+            SharedHafizDisplayOptions.get(context.applicationContext)
+        }
+        Q7HReadingSettingsSection(tafsirDisplay, hafizDisplay)
+        HorizontalDivider()
+        Q7HSliderRtlSettingsSection()
+        HorizontalDivider()
+        Q7HSheetVisibilitySettings()
+        HorizontalDivider()
+        Q7HQuickActionSettings()
+        Q7HBackupSettings()
         Spacer(Modifier.height(20.dp))
     }
 }
@@ -1218,4 +1343,3 @@ internal fun russianWordCount(count: Int): String {
     }
     return "$count $suffix"
 }
-

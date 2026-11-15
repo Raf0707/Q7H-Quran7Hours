@@ -50,11 +50,44 @@ class PlaybackService : MediaSessionService() {
     private var ayahRecitersCompleted = 0
     private var internalAyahTransition = false
     private var internalAyahSeek = false
+    private var ayahRangePasses = 0
+    private var ayahRangeReciter = 0
+    private var lastHadrRangeSignature: String? = null
+    private var hadrRangePasses = 0
+    private var lastAyahSeekGeneration = 0
+
 
     private fun resetHadrN() {
         hadrNKey = null
         hadrNCompleted = 0
         lastBoundaryHandled = null
+    }
+
+    /** Respond to the second range slider without clearing the selected range. */
+    private fun applyRequestedAyahSeek() {
+        val generation=hadrPrefs.getInt("q7h_ayah_seek_generation",0)
+        if(generation==lastAyahSeekGeneration || !::ayah.isInitialized) return
+        lastAyahSeekGeneration=generation
+        if(!hadrPrefs.getBoolean("q7h_range_ayah_enabled",false)) return
+        val surah=hadrPrefs.getInt("q7h_ayah_seek_target_s",-1)
+        val verse=hadrPrefs.getInt("q7h_ayah_seek_target_a",-1)
+        if(!QuranCatalog.isValidAyah(surah,verse)) return
+        val startS=hadrPrefs.getInt("q7h_range_ayah_start_s",-1)
+        val startA=hadrPrefs.getInt("q7h_range_ayah_start_a",-1)
+        val endS=hadrPrefs.getInt("q7h_range_ayah_end_s",-1)
+        val endA=hadrPrefs.getInt("q7h_range_ayah_end_a",-1)
+        if(surah<startS || surah==startS && verse<startA ||
+            surah>endS || surah==endS && verse>endA) return
+        val parts=ayah.currentMediaItem?.mediaId.orEmpty().split(':')
+        if(parts.size!=5 || parts[0]!="ayah") return
+        val reciter=Reciter(parts[3],parts[4])
+        internalAyahTransition=true
+        ayah.setMediaItem(MediaItem.Builder().setMediaId(
+            "ayah:$surah:$verse:${reciter.repository}:${reciter.branch}")
+            .setUri(reciter.audioUrl(surah,verse)).build())
+        ayah.repeatMode=Player.REPEAT_MODE_OFF
+        ayah.prepare()
+        ayah.play()
     }
 
     private fun resetAyahCycle() {
@@ -69,63 +102,100 @@ class PlaybackService : MediaSessionService() {
         hadr.seekTo(position)
     }
 
-    /** Exact timed segment repeat; supports all five segment types. */
+    /** Repeat a range or a single EXPLICITLY selected segment, never its predecessor. */
     private fun applyHadrSegmentMode() {
         if (!::hadr.isInitialized || !hadr.isPlaying || restoreWaitingForReady) return
-        val category = hadrPrefs.getString("hadr_active_segment", null) ?: return
-        val segment = runCatching { QuranCatalog.Segment.valueOf(category) }.getOrNull() ?: return
-        val marks = hadrTimings.marks(segment)
-        val pos = hadr.currentPosition
-        val currentIndex = marks.indexOfLast { it.positionMs != null && it.positionMs!! <= pos }
-        for (index in listOf(currentIndex - 1, currentIndex)) {
-            if (index !in marks.indices) continue
-            val item = marks[index]
-            val start = item.positionMs ?: continue
-            // Missing editable timings are NOT permission to loop the rest of the MP3.
-            // Only the actual last segment may terminate at the full recording end.
-            val end = marks.getOrNull(index + 1)?.positionMs
-                ?: (if (index == marks.lastIndex)
-                    hadr.duration.takeIf { it > 0L && it != C.TIME_UNSET }
-                    else null)
-                ?: continue
-            if (end <= start) continue
-            val mode = hadrPrefs.getString("hadr_mode_${segment.name}_${item.number}", "NEXT") ?: "NEXT"
-            if (mode == "NEXT") continue
-            val n = hadrPrefs.getInt("hadr_repeat_n", 3).coerceIn(1, 1000)
-            val marker = "${segment.name}:${item.number}:$mode:${if (mode == "REPEAT_N") n else 0}"
-            if (mode == "REPEAT_N" && hadrNKey != marker && pos in start until end) {
-                hadrNKey = marker
-                hadrNCompleted = 0
-            }
-            if (pos < end - 500L && lastBoundaryHandled == marker) lastBoundaryHandled = null
-            if (pos < end - 150L || pos > end + 1000L || lastBoundaryHandled == marker) continue
-            lastBoundaryHandled = marker
-            when (mode) {
-                "REPEAT" -> hadrSeekWithinSegment(start)
-                "STOP" -> {
-                    hadr.pause()
-                    hadrSeekWithinSegment(end)
-                }
-                "REPEAT_N" -> {
-                    if (hadrNKey != marker) {
-                        hadrNKey = marker
-                        hadrNCompleted = 0
-                    }
-                    hadrNCompleted++
-                    if (hadrNCompleted < n) {
-                        hadrSeekWithinSegment(start)
-                    } else {
-                        hadr.pause()
-                        hadrSeekWithinSegment(end)
-                        // Do not restart N when resuming the next segment.
-                        hadrNKey = null
-                        hadrNCompleted = 0
-                    }
-                }
-            }
-            saveHadrPosition(force = true)
-            break
+        if (hadrPrefs.getBoolean("q7h_range_hadr_enabled",false)) {
+            applyHadrRange()
+            return
         }
+        val category = hadrPrefs.getString("hadr_active_segment",null) ?: return
+        val segment = runCatching { QuranCatalog.Segment.valueOf(category) }.getOrNull() ?: return
+        val number = hadrPrefs.getInt("hadr_active_number",-1)
+        val marks = hadrTimings.marks(segment)
+        val index = marks.indexOfFirst { it.number == number }
+        if (index < 0) return
+        val start = marks[index].positionMs ?: return
+        val end = marks.getOrNull(index+1)?.positionMs
+            ?: hadr.duration.takeIf { index == marks.lastIndex && it > 0 && it != C.TIME_UNSET }
+            ?: return
+        if (end <= start) return
+        val pos = hadr.currentPosition
+        // A manual selection of page 4 MUST NOT be sent back to looping page 3.
+        if (pos < start || pos > end + 500L) return
+        val mode = hadrPrefs.getString("hadr_mode_${segment.name}_$number","NEXT") ?: "NEXT"
+        if (mode == "NEXT") return
+        val marker = "${segment.name}:$number:$mode"
+        if (hadrNKey != marker) {
+            hadrNKey=marker; hadrNCompleted=0; lastBoundaryHandled=null
+        }
+        if (pos < end - 450L) {
+            if (lastBoundaryHandled == marker) lastBoundaryHandled=null
+            return
+        }
+        if (pos < end - 180L || lastBoundaryHandled == marker) return
+        lastBoundaryHandled = marker
+        when (mode) {
+            "REPEAT" -> hadrSeekWithinSegment(start)
+            "STOP" -> { hadr.pause(); hadrSeekWithinSegment(end) }
+            "REPEAT_N" -> {
+                hadrNCompleted++
+                val n = hadrPrefs.getInt("hadr_repeat_n",3).coerceIn(1,1000)
+                if (hadrNCompleted < n) hadrSeekWithinSegment(start)
+                else { hadr.pause(); hadrSeekWithinSegment(end) }
+            }
+        }
+        saveHadrPosition(force=true)
+    }
+
+    /** Hadr ranges use only actual recorded marks and end at the next mark. */
+    private fun applyHadrRange() {
+        val segment = runCatching {
+            QuranCatalog.Segment.valueOf(hadrPrefs.getString("q7h_range_hadr_segment","") ?: "")
+        }.getOrNull() ?: return
+        val first = hadrPrefs.getInt("q7h_range_hadr_start",-1)
+        val last = hadrPrefs.getInt("q7h_range_hadr_end",-1)
+        val marks = hadrTimings.marks(segment)
+        val startIndex = marks.indexOfFirst { it.number == first }
+        val endIndex = marks.indexOfFirst { it.number == last }
+        if (startIndex < 0 || endIndex < startIndex) return
+        val start = marks[startIndex].positionMs ?: return
+        val end = marks.getOrNull(endIndex + 1)?.positionMs
+            ?: hadr.duration.takeIf { endIndex == marks.lastIndex && it > 0 && it != C.TIME_UNSET }
+            ?: return
+        if (start >= end) return
+        val mode = hadrPrefs.getString("q7h_range_hadr_mode","STOP") ?: "STOP"
+        val generation=hadrPrefs.getInt("q7h_range_hadr_generation",0)
+        val signature = "${segment.name}:$first:$last:$mode:$generation"
+        if (lastHadrRangeSignature != signature) {
+            lastHadrRangeSignature=signature
+            hadrRangePasses=0
+            lastBoundaryHandled=null
+        }
+        val pos=hadr.currentPosition
+        if (pos < start || pos > end + 600L) return
+        if (pos < end - 450L) {
+            if (lastBoundaryHandled == signature) lastBoundaryHandled=null
+            return
+        }
+        if (pos < end - 180L || lastBoundaryHandled == signature) return
+        lastBoundaryHandled = signature
+        hadrRangePasses++
+        val n = hadrPrefs.getInt("hadr_repeat_n",3).coerceIn(1,1000)
+        val again = mode == "REPEAT" || mode == "REPEAT_N" && hadrRangePasses < n
+        if (mode == "NEXT") {
+            hadrPrefs.edit().putBoolean("q7h_range_hadr_enabled",false).apply()
+            lastBoundaryHandled=null
+            return // Continue the full 7-hour MP3 after the interval.
+        }
+        if (again) {
+            hadrSeekWithinSegment(start)
+        } else {
+            hadr.pause()
+            hadrSeekWithinSegment(end)
+            hadrPrefs.edit().putBoolean("q7h_range_hadr_enabled",false).apply()
+        }
+        saveHadrPosition(force=true)
     }
 
     private fun saveHadrPosition(force: Boolean = false) {
@@ -185,6 +255,71 @@ class PlaybackService : MediaSessionService() {
             }
         }.distinctBy { it.repository }
     }.getOrDefault(emptyList())
+
+    /** Consume a verse-ended event when the range player is active. */
+    private fun onAyahRangeFinished(error: Boolean): Boolean {
+        if (!hadrPrefs.getBoolean("q7h_range_ayah_enabled",false)) return false
+        val fields = ayah.currentMediaItem?.mediaId.orEmpty().split(':')
+        if (fields.size != 5 || fields[0] != "ayah") return false
+        val surah=fields[1].toIntOrNull() ?: return false
+        val verse=fields[2].toIntOrNull() ?: return false
+        val endSurah=hadrPrefs.getInt("q7h_range_ayah_end_s",-1)
+        val endAyah=hadrPrefs.getInt("q7h_range_ayah_end_a",-1)
+        if (!QuranCatalog.isValidAyah(endSurah,endAyah)) return false
+        val mode=currentAyahMode()
+        val next=QuranCatalog.nextAyah(surah,verse)
+        if (next != null && (next.first < endSurah ||
+                next.first == endSurah && next.second <= endAyah)) {
+            playRangeVerse(next.first,next.second,fields[3],fields[4])
+            return true
+        }
+        val startS=hadrPrefs.getInt("q7h_range_ayah_start_s",surah)
+        val startA=hadrPrefs.getInt("q7h_range_ayah_start_a",verse)
+        val allowedPasses = when (mode) {
+            AyahEndMode.ALL_RECITERS -> hadrPrefs.getInt("ayah_all_reciters_repeat_count",1)
+            AyahEndMode.REPEAT_N -> hadrPrefs.getInt("ayah_repeat_n",3)
+            else -> 1
+        }.coerceIn(1,1000)
+        ayahRangePasses++
+        if (!error && (mode == AyahEndMode.REPEAT || ayahRangePasses < allowedPasses)) {
+            playRangeVerse(startS,startA,fields[3],fields[4])
+            return true
+        }
+        ayahRangePasses=0
+        if (mode == AyahEndMode.NEXT) {
+            hadrPrefs.edit().putBoolean("q7h_range_ayah_enabled",false).apply()
+            val following=QuranCatalog.nextAyah(surah,verse)
+            if (following != null) {
+                playRangeVerse(following.first,following.second,fields[3],fields[4])
+                ayah.repeatMode=Player.REPEAT_MODE_ALL
+            }
+            return true
+        }
+        if (mode == AyahEndMode.ALL_RECITERS) {
+            val all=orderedReciters()
+            val at=all.indexOfFirst { it.repository == fields[3] && it.branch == fields[4] }
+            if (at>=0 && ayahRangeReciter+1<all.size) {
+                ayahRangeReciter++
+                val nextReciter=all[(at+1) % all.size]
+                playRangeVerse(startS,startA,nextReciter.repository,nextReciter.branch)
+                return true
+            }
+        }
+        hadrPrefs.edit().putBoolean("q7h_range_ayah_enabled",false).apply()
+        return true
+    }
+
+    private fun playRangeVerse(surah:Int,verse:Int,repository:String,branch:String) {
+        if (!QuranCatalog.isValidAyah(surah,verse)) return
+        val reciter=Reciter(repository,branch)
+        internalAyahTransition=true
+        ayah.setMediaItem(MediaItem.Builder()
+            .setMediaId("ayah:$surah:$verse:$repository:$branch")
+            .setUri(reciter.audioUrl(surah,verse)).build())
+        ayah.repeatMode=Player.REPEAT_MODE_OFF
+        ayah.prepare()
+        ayah.play()
+    }
 
     /** Dedicated finite playback machine; NEVER enqueue 43 * 1000 MP3 items. */
     private fun onSpecialAyahFinished(error: Boolean = false) {
@@ -278,7 +413,11 @@ class PlaybackService : MediaSessionService() {
                 if (restoreWaitingForReady && reason == Player.DISCONTINUITY_REASON_SEEK)
                     restoreTargetMs = newPosition.positionMs.coerceAtLeast(0L)
                 if (reason == Player.DISCONTINUITY_REASON_SEEK) {
-                    if (!internalHadrSeek) resetHadrN() // Manual seek starts a new N series.
+                    if (!internalHadrSeek) {
+                        resetHadrN()
+                        hadrRangePasses=0
+                        lastHadrRangeSignature=null
+                    }
                     internalHadrSeek = false
                 }
                 saveHadrPosition(force = true)
@@ -297,16 +436,22 @@ class PlaybackService : MediaSessionService() {
                 if (isPlaying) hadr.pause()
             }
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                if (!internalAyahTransition) resetAyahCycle()
+                if (!internalAyahTransition) {
+                    resetAyahCycle()
+                    ayahRangePasses=0
+                    ayahRangeReciter=0
+                }
                 internalAyahTransition = false
-                updateNextAyah()
+                if (!hadrPrefs.getBoolean("q7h_range_ayah_enabled",false)) updateNextAyah()
             }
             override fun onRepeatModeChanged(repeatMode: Int) {
+                if (hadrPrefs.getBoolean("q7h_range_ayah_enabled",false)) return
                 if (repeatMode == Player.REPEAT_MODE_ALL) updateNextAyah()
                 else clearFollowingAyahs()
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_ENDED) onSpecialAyahFinished()
+                if (playbackState == Player.STATE_ENDED && !onAyahRangeFinished(false))
+                    onSpecialAyahFinished()
             }
             override fun onPositionDiscontinuity(
                 oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int
@@ -318,7 +463,7 @@ class PlaybackService : MediaSessionService() {
             }
             override fun onPlayerError(error: PlaybackException) {
                 Log.w("Q7H-Ayah", "Reciter stream failed; skipping this reciter", error)
-                onSpecialAyahFinished(error = true)
+                if (!onAyahRangeFinished(true)) onSpecialAyahFinished(error = true)
             }
         })
         restoreHadrOnLaunch()
@@ -327,6 +472,7 @@ class PlaybackService : MediaSessionService() {
         persistenceScope.launch {
             while (isActive) {
                 delay(150L)
+                applyRequestedAyahSeek()
                 if (hadr.isPlaying) {
                     applyHadrSegmentMode()
                     val now = android.os.SystemClock.elapsedRealtime()
@@ -348,7 +494,8 @@ class PlaybackService : MediaSessionService() {
 
     /** Existing NEXT mode: append the next verse in the same reciter. */
     private fun updateNextAyah() {
-        if (ayah.repeatMode != Player.REPEAT_MODE_ALL) return
+        if (hadrPrefs.getBoolean("q7h_range_ayah_enabled",false) ||
+            ayah.repeatMode != Player.REPEAT_MODE_ALL) return
         val fields = ayah.currentMediaItem?.mediaId.orEmpty().split(':')
         if (fields.size != 5 || fields[0] != "ayah") return
         val surah = fields[1].toIntOrNull() ?: return

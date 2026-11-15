@@ -23,14 +23,16 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.media3.session.MediaController
 import kotlinx.coroutines.flow.collectLatest
 import raf.console.quran7hours.data.LearningDatabase
 import raf.console.quran7hours.data.TafsirStore
 import raf.console.quran7hours.data.UserPreferences
+import raf.console.quran7hours.data.WordByWordStore
+import raf.console.quran7hours.media.AyahEndMode
+import raf.console.quran7hours.media.Reciter
 
-/** Hafiz diary with the exact same QPC light/dark renderer as Tafsir.
- *  Existing per-ayah notes and scroll snapshots use the same persisted keys.
- */
+/** Same atomic font preparation as Tafsir; independent diary display settings. */
 @Composable
 internal fun HafizDiaryPanelEnhanced(
     page: Int,
@@ -38,17 +40,34 @@ internal fun HafizDiaryPanelEnhanced(
     prefs: UserPreferences,
     db: LearningDatabase,
     tajweed: Boolean,
+    wordStore: WordByWordStore,
+    playback: PlaybackSnapshot,
+    controller: MediaController?,
+    reciters: List<Reciter>,
+    reciterError: String,
+    selectedReciter: String,
+    onReciter: (String) -> Unit,
+    endMode: AyahEndMode,
+    onEndMode: (AyahEndMode) -> Unit,
+    onPlayVerse: (Int, Int) -> Unit,
+    onNoteAyah: (Int, Int) -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit
 ) {
     val context = LocalContext.current
-    val prepared by produceState<QpcPreparedPage?>(null, page, tafsir) {
-        value = QpcPreparedPages.page(context, tafsir, page)
+    val ready by produceState<QpcPreparedPage?>(null, page, tafsir) {
+        value = QpcPreparedPages.page(context.applicationContext, tafsir, page)
     }
     val displayPreferences = remember(context.applicationContext) {
-        SharedTafsirDisplayOptions.get(context.applicationContext)
+        SharedHafizDisplayOptions.get(context.applicationContext)
     }
     val display = displayPreferences.value
+    val dictionaries by produceState<Map<Pair<Int, Int>, List<WordByWordStore.Word>>>(
+        emptyMap(), page, ready, display.showDictionary
+    ) {
+        // Load also when hidden: copy/share-part must be able to include this block.
+        value = ready?.verses?.let { wordStore.forPage(page,it) }.orEmpty()
+    }
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val tapSource = remember { MutableInteractionSource() }
@@ -57,17 +76,17 @@ internal fun HafizDiaryPanelEnhanced(
             focus.clearFocus(); keyboard?.hide()
         }.padding(horizontal = 12.dp)
     ) {
-        val ready = prepared
-        if (ready == null) {
+        val prepared = ready
+        if (prepared == null) {
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
-        } else if (ready.verses.isEmpty()) {
+        } else if (prepared.verses.isEmpty()) {
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 Text("Для этой страницы не найдены аяты в локальном тафсире.")
             }
         } else {
-            val verses = ready.verses
+            val verses = prepared.verses
             val listState = remember(page) {
                 val (index, offset) = prefs.panelViewport("hafiz_$page")
                 LazyListState(index.coerceIn(0, verses.lastIndex), offset)
@@ -86,7 +105,8 @@ internal fun HafizDiaryPanelEnhanced(
                 contentPadding = PaddingValues(top = 14.dp, bottom = 22.dp)
             ) {
                 items(verses, key = { "${it.surah}:${it.ayah}" }) { verse ->
-                    val qpc = ready.qpc[verse.surah to verse.ayah]
+                    val qpc = prepared.qpc[verse.surah to verse.ayah]
+                    val q7hFootnotes = remember(verse.surah, verse.ayah) { Q7HFootnoteNavigator() }
                     var note by remember(verse.surah, verse.ayah) {
                         mutableStateOf(db.hafizNote(verse.surah, verse.ayah))
                     }
@@ -95,40 +115,104 @@ internal fun HafizDiaryPanelEnhanced(
                             Modifier.fillMaxWidth().padding(14.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text("${verse.surah}:${verse.ayah}",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary)
+                            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                                Text("${verse.surah}:${verse.ayah}",
+                                    modifier=Modifier.weight(1f),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary)
+                                if (display.showAudio) {
+                                    AyahAudioControls(
+                                        surah=verse.surah,ayah=verse.ayah,
+                                        playback=playback,controller=controller,
+                                        reciters=reciters,reciterError=reciterError,
+                                        selectedReciter=selectedReciter,onReciter=onReciter,
+                                        prefs=prefs,endMode=endMode,onEndMode=onEndMode,
+                                        onPlay={onPlayVerse(verse.surah,verse.ayah)},
+                                        playOnly = true
+                                    )
+                                }
+                                val words = dictionaries[verse.surah to verse.ayah].orEmpty()
+                                Q7HAyahActions(
+                                    content = Q7HVerseContent(
+                                        surah = verse.surah, ayah = verse.ayah,
+                                        arabic = verse.arabic, translation = verse.translation,
+                                        tafsir = verse.explanation,
+                                        dictionary = words.joinToString("\n") { "${it.arabic} — ${it.translationRu}" },
+                                        showArabic = true, showDictionary = display.showDictionary,
+                                        showTranslation = true, showTafsir = display.showTafsir,
+                                        order = display.blockOrder
+                                    ), onNote = onNoteAyah
+                                )
+                            }
                             if (qpc != null) {
-                                // Applies real QPC V2 or V4 font, including the dark V4 CPAL palette.
                                 Q7HAdjustableOriginalQpcText(qpc, tajweed, display.arabicSp)
                             } else {
                                 Q7HAdjustableUnicodeArabicText(verse.arabic, null, display.arabicSp)
                             }
-                            if (verse.translation.isNotBlank()) Text(
-                                verse.translation,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            OutlinedTextField(
-                                value = note,
-                                onValueChange = { value ->
-                                    note = value
-                                    db.saveHafizNote(verse.surah, verse.ayah, value)
-                                },
-                                label = { Text("Мои ошибки, подсказки и замечания") },
-                                minLines = 2,
-                                maxLines = 5,
-                                modifier = Modifier.fillMaxWidth(),
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = {
-                                    focus.clearFocus(); keyboard?.hide()
-                                })
-                            )
+                            // Only Arabic & audio have fixed positions. All other
+                            // blocks follow the user's persisted order.
+                            display.blockOrder.forEach { block ->
+                                when (block) {
+                                    "dictionary" -> if (display.showDictionary) {
+                                        AyahWordDictionary(verse.surah,verse.ayah,
+                                            dictionaries[verse.surah to verse.ayah].orEmpty(),
+                                            display.dictionarySp, false)
+                                    }
+                                    "translation" -> if (verse.translation.isNotBlank()) {
+                                        Q7HFootnoteText(verse.translation,q7hFootnotes,"translation",
+                                            style=MaterialTheme.typography.bodyMedium.copy(
+                                                fontSize=display.translationSp.sp,
+                                                lineHeight=(display.translationSp*1.45f).sp))
+                                    }
+                                    "tafsir" -> if (display.showTafsir && verse.explanation.isNotBlank()) {
+                                        val formatted=remember(verse.explanation){tafsir.format(verse.explanation)}
+                                        formatted.forEachIndexed { index, paragraph ->
+                                            when (paragraph.type) {
+                                                TafsirStore.Paragraph.Type.QUOTE -> Surface(
+                                                    color=MaterialTheme.colorScheme.primaryContainer,
+                                                    shape=RoundedCornerShape(12.dp)) {
+                                                    Q7HFootnoteText(paragraph.text,q7hFootnotes,"tafsir-$index",
+                                                        modifier=Modifier.fillMaxWidth().padding(12.dp),
+                                                        style=MaterialTheme.typography.bodyMedium.copy(
+                                                            fontSize=display.tafsirSp.sp))
+                                                }
+                                                else -> Q7HFootnoteText(paragraph.text,q7hFootnotes,"tafsir-$index",
+                                                    style=MaterialTheme.typography.bodyMedium.copy(
+                                                        fontSize=display.tafsirSp.sp,
+                                                        lineHeight=(display.tafsirSp*1.45f).sp))
+                                            }
+                                        }
+                                    }
+                                    "counter" -> HafizRepetitionCounter(verse.surah,verse.ayah)
+                                    "notes" -> OutlinedTextField(
+                                        value = note,
+                                        onValueChange = { value ->
+                                            note = value
+                                            db.saveHafizNote(verse.surah, verse.ayah, value)
+                                        },
+                                        label = { Text("Мои ошибки, подсказки и замечания") },
+                                        minLines = 2,maxLines=5,modifier=Modifier.fillMaxWidth(),
+                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                        keyboardActions = KeyboardActions(onDone = {
+                                            focus.clearFocus(); keyboard?.hide()
+                                        })
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
         }
-        // Fixed bottom navigation, just as in the Tafsir panel.
+        Q7HAyahSecondaryRangeSlider(playback)
+        if (display.showAudio) {
+            val target = q7hAyahMiniTarget(ready?.verses.orEmpty(), playback)
+            if (target != null) {
+                Q7HAyahMiniPlayer(target, playback, controller, prefs,
+                    reciters, reciterError, selectedReciter, onReciter,
+                    endMode, onEndMode, onPlayVerse)
+            }
+        }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Row(
             modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(vertical = 2.dp),

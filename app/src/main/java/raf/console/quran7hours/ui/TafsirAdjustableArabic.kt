@@ -282,6 +282,20 @@ private object AdjustableQpcFonts {
 }
 
 /**
+ * Warm exactly the typeface cache used by Tafsir's adjustable renderer.
+ * Called on Dispatchers.IO by QpcPreparedPages; never while composing a verse.
+ */
+internal fun warmAdjustableQpcFonts(context: Context, ayahs: Collection<OriginalQpcAyah>) {
+    ayahs.asSequence().flatMap { it.parts.asSequence() }.map { it.page }
+        .distinct().forEach { page ->
+            AdjustableQpcFonts.get(context, page, tajweed = false, dark = false)
+            AdjustableQpcFonts.get(context, page, tajweed = false, dark = true)
+            AdjustableQpcFonts.get(context, page, tajweed = true, dark = false)
+            AdjustableQpcFonts.get(context, page, tajweed = true, dark = true)
+        }
+}
+
+/**
  * QCF fonts use Arabic Presentation Form codepoints as *page-specific word glyphs*.
  * Some Android text-layout paths pick a Unicode fallback when the Typeface exists
  * only as a MetricAffectingSpan. In that case U+FCCF is interpreted as a generic

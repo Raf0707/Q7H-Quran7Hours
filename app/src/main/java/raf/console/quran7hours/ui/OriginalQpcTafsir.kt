@@ -46,6 +46,44 @@ internal data class OriginalQpcAyah(val parts: List<OriginalQpcPart>)
 private const val QPC_ROOT = "quran/qpc-v4"
 private const val LOG_TAG = "QpcTafsir"
 
+/**
+ * QPC (Madinah) counts basmala as Fatihah 1:1. Quran7Hours uses the
+ * Hanafi/Azan.ru division, where basmala is separate and the seven verses
+ * start with "al-hamdu lillah".
+ *
+ * The Arabic word-glyphs are ALREADY matched to the Hanafi verses above;
+ * only the *verse-end ornament glyph* must be re-numbered. These seven
+ * codepoints are the REAL ornamental numerals embedded in p1.ttf (V2/V4).
+ * Never replace an Arabic word-glyph, and never change the page-specific font.
+ */
+private val Q7H_FATIHA_END_MARKERS: Map<Int, String> = mapOf(
+    1 to "\uFC45", 2 to "\uFC4A", 3 to "\uFC4D", 4 to "\uFC51",
+    5 to "\uFC56", 6 to "\uFC5A", 7 to "\uFC64"
+)
+
+/** Return null rather than displaying wrongly numbered Qur'anic ornaments. */
+private fun q7hHanafiFatihaNumberedGlyphs(ayah: Int, glyphs: String): String? {
+    val desired = Q7H_FATIHA_END_MARKERS[ayah] ?: return null
+    return when (ayah) {
+        in 1..5 -> {
+            val source = Q7H_FATIHA_END_MARKERS[ayah + 1] ?: return null
+            if (!glyphs.endsWith(" $source")) null
+            else glyphs.dropLast(source.length) + desired
+        }
+        6 -> {
+            // The Hanafi sixth verse ends after "alayhim", in the MIDDLE
+            // of canonical QPC 1:7. There is no ornament in the source run.
+            if (glyphs.isBlank() || Q7H_FATIHA_END_MARKERS.values.any {
+                    glyphs.endsWith(" $it")
+                }) null
+            else "$glyphs $desired"
+        }
+        7 -> if (glyphs.endsWith(" $desired")) glyphs else null
+        else -> null
+    }
+}
+
+
 private fun verseId(surah: Int, ayah: Int): Long = (surah.toLong() shl 32) or (ayah.toLong() and 0xffffffffL)
 
 private data class OriginalQpcWord(
@@ -103,9 +141,10 @@ internal class OriginalQpcTafsirRepository(context: Context) {
         verses: List<raf.console.quran7hours.data.TafsirStore.Verse>
     ): Map<Pair<Int, Int>, OriginalQpcAyah> = withContext(Dispatchers.IO) {
         if (page !in 1..604 || verses.isEmpty()) return@withContext emptyMap()
+        // A single missing font/layout must NOT disable all 604 pages.
+        // Each layout is validated as used; missing fonts are reported by renderers.
         if (!packComplete) {
-            Log.w(LOG_TAG, "QPC V2/V4/layout pack incomplete; run tools/audit_qpc_tafsir_pack.py")
-            return@withContext emptyMap()
+            Log.w(LOG_TAG, "Some QPC files are missing; trying available pages individually")
         }
 
         val index = getVersePageIndex()
@@ -184,6 +223,23 @@ internal class OriginalQpcTafsirRepository(context: Context) {
                 }
             }
             if (parts.isNotEmpty()) {
+                // Canonical QPC numbers the basmala 1 and the following verses
+                // 2..7. After splitting into seven Hanafi verses, correct only
+                // the ornamental number glyph at the end of EACH card.
+                if (verse.surah == 1 && verse.ayah in 1..7) {
+                    if (parts.size != 1 || parts[0].page != 1) {
+                        Log.e(LOG_TAG, "Fatiha ${verse.ayah}: unexpected font page; safe fallback")
+                        continue
+                    }
+                    val fixed = q7hHanafiFatihaNumberedGlyphs(
+                        verse.ayah, parts[0].glyphs
+                    )
+                    if (fixed == null) {
+                        Log.e(LOG_TAG, "Fatiha ${verse.ayah}: verse-end ornament mismatch; safe fallback")
+                        continue
+                    }
+                    parts[0] = parts[0].copy(glyphs = fixed)
+                }
                 result[key] = OriginalQpcAyah(parts)
             }
         }
@@ -248,7 +304,8 @@ internal class OriginalQpcTafsirRepository(context: Context) {
             Log.e(LOG_TAG, "Cannot read QPC layout $path", e)
             emptyList()
         }
-        synchronized(pageCache) { pageCache[page] = words }
+        // Never remember failed reads: assets may be installed/extracted after first use.
+        if (words.isNotEmpty()) synchronized(pageCache) { pageCache[page] = words }
         return words
     }
 }

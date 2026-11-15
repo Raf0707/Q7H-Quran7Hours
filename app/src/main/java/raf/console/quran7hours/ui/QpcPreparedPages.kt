@@ -16,7 +16,8 @@ import raf.console.quran7hours.data.TafsirStore
  */
 internal data class QpcPreparedPage(
     val verses: List<TafsirStore.Verse>,
-    val qpc: Map<Pair<Int, Int>, OriginalQpcAyah>
+    val qpc: Map<Pair<Int, Int>, OriginalQpcAyah>,
+    val introductions: List<TafsirStore.SurahIntroduction> = emptyList()
 )
 
 internal object QpcPreparedPages {
@@ -40,15 +41,19 @@ internal object QpcPreparedPages {
                     ready.clear()
                 }
                 ready[number]?.let { return@withContext it }
-                val verses = store.page(number)
+                val readingPage = store.readingPage(number)
+                val verses = readingPage?.verses.orEmpty()
                 val qpc = repo!!.forPage(number, verses)
                 // Both variants are ready before this object becomes visible to Compose.
                 warmOriginalQpcFonts(app, qpc.values)
-                QpcPreparedPage(verses, qpc).also { ready[number] = it }
+                warmAdjustableQpcFonts(app, qpc.values)
+                QpcPreparedPage(verses, qpc, readingPage?.introductions.orEmpty()).also { ready[number] = it }
             } finally {
                 lock.unlock()
             }
         }
+
+    fun cached(number: Int): QpcPreparedPage? = synchronized(ready) { ready[number] }
 
     /** Called immediately on activity creation, without waiting for panel opening. */
     fun start(context: Context, store: TafsirStore, currentPage: Int) {
