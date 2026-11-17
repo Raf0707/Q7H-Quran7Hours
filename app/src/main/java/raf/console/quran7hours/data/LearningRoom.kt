@@ -64,6 +64,17 @@ data class HafizNoteEntity(
     val uuid: String
 )
 
+/** User-editable highlighter palette, stored in Room and included in backup snapshots. */
+@Entity(tableName = "ink_colors")
+data class InkColorEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val argb: Long,
+    val purpose: String = "",
+    @ColumnInfo(name = "sort_order") val sortOrder: Int,
+    @ColumnInfo(name = "is_tajweed") val isTajweed: Int = 0,
+    @ColumnInfo(name = "is_custom") val isCustom: Int = 0
+)
+
 @Entity(tableName = "learning_meta")
 data class LearningMetaEntity(@PrimaryKey val key: String, val value: String)
 
@@ -96,25 +107,44 @@ interface LearningDao {
     @Query("SELECT * FROM hafiz_notes WHERE surah=:surah AND ayah=:ayah LIMIT 1") suspend fun hafizNote(surah: Int, ayah: Int): HafizNoteEntity?
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putHafizNote(row: HafizNoteEntity)
 
+    @Query("SELECT * FROM ink_colors ORDER BY sort_order, id") suspend fun inkColors(): List<InkColorEntity>
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putInkColor(row: InkColorEntity): Long
+    @Update suspend fun updateInkColor(row: InkColorEntity)
+    @Query("DELETE FROM ink_colors WHERE id = :id AND is_custom = 1") suspend fun deleteCustomInkColor(id: Long)
+
     @Query("SELECT value FROM learning_meta WHERE `key`=:key LIMIT 1") suspend fun meta(key: String): String?
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putMeta(row: LearningMetaEntity)
 }
 
 @Database(
     entities = [BookmarkTypeEntity::class, BookmarkEntity::class, NoteEntity::class,
-        PageAnnotationEntity::class, HafizNoteEntity::class, LearningMetaEntity::class],
-    version = 1,
+        PageAnnotationEntity::class, HafizNoteEntity::class, LearningMetaEntity::class,
+        InkColorEntity::class],
+    version = 2,
     exportSchema = true
 )
 abstract class LearningRoomDatabase : RoomDatabase() {
     abstract fun learningDao(): LearningDao
 
     companion object {
+        private val INK_COLORS_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Additive migration: no bookmark, note, drawing or hafiz data is touched.
+                db.execSQL("""CREATE TABLE IF NOT EXISTS `ink_colors` (
+                    `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    `argb` INTEGER NOT NULL,
+                    `purpose` TEXT NOT NULL,
+                    `sort_order` INTEGER NOT NULL,
+                    `is_tajweed` INTEGER NOT NULL,
+                    `is_custom` INTEGER NOT NULL)""")
+            }
+        }
         @Volatile private var instance: LearningRoomDatabase? = null
         fun open(context: Context): LearningRoomDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, LearningRoomDatabase::class.java,
                 "q7h_learning_room.db")
                 // No destructive fallback: missing migrations must fail rather than erase notes.
+                .addMigrations(INK_COLORS_1_2)
                 .build().also { instance = it }
         }
     }

@@ -13,7 +13,10 @@ object BookmarkColors {
         "Красный" to 0xFFE05252L, "Оранжевый" to 0xFFF19C48L,
         "Жёлтый" to 0xFFE9C84BL, "Зелёный" to 0xFF49A876L,
         "Бирюзовый" to 0xFF3BA9A6L, "Синий" to 0xFF5387DCL,
-        "Фиолетовый" to 0xFF9476D2L, "Розовый" to 0xFFD773AAL
+        "Фиолетовый" to 0xFF9476D2L, "Розовый" to 0xFFD773AAL,
+        "Белый" to 0xFFFFFFFFL, "Серый" to 0xFF808080L,
+        "Чёрный" to 0xFF161616L, "Коричневый" to 0xFF795548L,
+        "Бежевый" to 0xFFD8C5A6L
     )
     fun parse(value: Any?): Long? {
         if (value is Number) return value.toLong() and 0xFFFFFFFFL

@@ -23,14 +23,40 @@ import org.json.JSONArray
 import raf.console.quran7hours.data.QuranCatalog
 import raf.console.quran7hours.data.TimingCatalog
 
-/** Two ExoPlayer engines, two sessions and one mutually exclusive audio output. */
+/** Independent Hadr, Tafsir and Hafiz players with three sessions; output stays mutually exclusive. */
 @UnstableApi
 class PlaybackService : MediaSessionService() {
     companion object { const val CHANNEL_HINT = "q7h.audio.channel" }
     private lateinit var hadr: ExoPlayer
-    private lateinit var ayah: ExoPlayer
+    private lateinit var tafsirAyah: ExoPlayer
+    private lateinit var hafizAyah: ExoPlayer
+    private val ayah: ExoPlayer get() = if(activeAyahChannel == AudioChannel.HAFIZ) hafizAyah else tafsirAyah
+    private var activeAyahChannel = AudioChannel.AYAH
+    private fun <T> withAyahChannel(channel: AudioChannel, block: () -> T): T {
+        val previous = activeAyahChannel
+        activeAyahChannel = channel
+        return try { block() } finally { activeAyahChannel = previous }
+    }
+    private data class AyahEngineState(
+        var cycleKey: String? = null,
+        var playedForCurrentReciter: Int = 0,
+        var recitersCompleted: Int = 0,
+        var internalTransition: Boolean = false,
+        var internalSeek: Boolean = false,
+        var rangePasses: Int = 0,
+        var rangeReciter: Int = 0,
+        var lastSeekGeneration: Int = 0
+    )
+    private val tafsirEngineState = AyahEngineState()
+    private val hafizEngineState = AyahEngineState()
+    private val ayahState: AyahEngineState get() =
+        if (activeAyahChannel == AudioChannel.HAFIZ) hafizEngineState else tafsirEngineState
+    private fun rangeKey(key: String): String = if(activeAyahChannel == AudioChannel.HAFIZ)
+        key.replace("q7h_range_ayah_","q7h_range_hafiz_")
+           .replace("q7h_ayah_seek_","q7h_hafiz_seek_") else key
     private lateinit var hadrSession: MediaSession
     private lateinit var ayahSession: MediaSession
+    private lateinit var hafizSession: MediaSession
     private val persistenceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val hadrPrefs by lazy { getSharedPreferences("q7h_compose", MODE_PRIVATE) }
     private var restoringHadr = false
@@ -45,16 +71,8 @@ class PlaybackService : MediaSessionService() {
     private var hadrNKey: String? = null
     private var hadrNCompleted = 0
     private var internalHadrSeek = false
-    private var ayahCycleKey: String? = null
-    private var ayahPlayedForCurrentReciter = 0
-    private var ayahRecitersCompleted = 0
-    private var internalAyahTransition = false
-    private var internalAyahSeek = false
-    private var ayahRangePasses = 0
-    private var ayahRangeReciter = 0
     private var lastHadrRangeSignature: String? = null
     private var hadrRangePasses = 0
-    private var lastAyahSeekGeneration = 0
 
 
     private fun resetHadrN() {
@@ -65,23 +83,23 @@ class PlaybackService : MediaSessionService() {
 
     /** Respond to the second range slider without clearing the selected range. */
     private fun applyRequestedAyahSeek() {
-        val generation=hadrPrefs.getInt("q7h_ayah_seek_generation",0)
-        if(generation==lastAyahSeekGeneration || !::ayah.isInitialized) return
-        lastAyahSeekGeneration=generation
-        if(!hadrPrefs.getBoolean("q7h_range_ayah_enabled",false)) return
-        val surah=hadrPrefs.getInt("q7h_ayah_seek_target_s",-1)
-        val verse=hadrPrefs.getInt("q7h_ayah_seek_target_a",-1)
+        val generation=hadrPrefs.getInt(rangeKey("q7h_ayah_seek_generation"),0)
+        if(generation==ayahState.lastSeekGeneration || !::tafsirAyah.isInitialized) return
+        ayahState.lastSeekGeneration=generation
+        if(!hadrPrefs.getBoolean(rangeKey("q7h_range_ayah_enabled"),false)) return
+        val surah=hadrPrefs.getInt(rangeKey("q7h_ayah_seek_target_s"),-1)
+        val verse=hadrPrefs.getInt(rangeKey("q7h_ayah_seek_target_a"),-1)
         if(!QuranCatalog.isValidAyah(surah,verse)) return
-        val startS=hadrPrefs.getInt("q7h_range_ayah_start_s",-1)
-        val startA=hadrPrefs.getInt("q7h_range_ayah_start_a",-1)
-        val endS=hadrPrefs.getInt("q7h_range_ayah_end_s",-1)
-        val endA=hadrPrefs.getInt("q7h_range_ayah_end_a",-1)
+        val startS=hadrPrefs.getInt(rangeKey("q7h_range_ayah_start_s"),-1)
+        val startA=hadrPrefs.getInt(rangeKey("q7h_range_ayah_start_a"),-1)
+        val endS=hadrPrefs.getInt(rangeKey("q7h_range_ayah_end_s"),-1)
+        val endA=hadrPrefs.getInt(rangeKey("q7h_range_ayah_end_a"),-1)
         if(surah<startS || surah==startS && verse<startA ||
             surah>endS || surah==endS && verse>endA) return
         val parts=ayah.currentMediaItem?.mediaId.orEmpty().split(':')
         if(parts.size!=5 || parts[0]!="ayah") return
         val reciter=Reciter(parts[3],parts[4])
-        internalAyahTransition=true
+        ayahState.internalTransition=true
         ayah.setMediaItem(MediaItem.Builder().setMediaId(
             "ayah:$surah:$verse:${reciter.repository}:${reciter.branch}")
             .setUri(reciter.audioUrl(surah,verse)).build())
@@ -91,9 +109,9 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun resetAyahCycle() {
-        ayahCycleKey = null
-        ayahPlayedForCurrentReciter = 0
-        ayahRecitersCompleted = 0
+        ayahState.cycleKey = null
+        ayahState.playedForCurrentReciter = 0
+        ayahState.recitersCompleted = 0
     }
 
     /** Seek behind a timing boundary without turning off the MediaSession. */
@@ -237,7 +255,7 @@ class PlaybackService : MediaSessionService() {
 
     private fun currentAyahMode(): AyahEndMode =
         AyahEndMode.entries.firstOrNull {
-            it.name == hadrPrefs.getString("ayahEndMode", "STOP")
+            it.name == hadrPrefs.getString(if(activeAyahChannel == AudioChannel.HAFIZ) "hafizEndMode" else "ayahEndMode", "STOP")
         } ?: AyahEndMode.STOP
 
     private fun orderedReciters(): List<Reciter> = runCatching {
@@ -258,13 +276,13 @@ class PlaybackService : MediaSessionService() {
 
     /** Consume a verse-ended event when the range player is active. */
     private fun onAyahRangeFinished(error: Boolean): Boolean {
-        if (!hadrPrefs.getBoolean("q7h_range_ayah_enabled",false)) return false
+        if (!hadrPrefs.getBoolean(rangeKey("q7h_range_ayah_enabled"),false)) return false
         val fields = ayah.currentMediaItem?.mediaId.orEmpty().split(':')
         if (fields.size != 5 || fields[0] != "ayah") return false
         val surah=fields[1].toIntOrNull() ?: return false
         val verse=fields[2].toIntOrNull() ?: return false
-        val endSurah=hadrPrefs.getInt("q7h_range_ayah_end_s",-1)
-        val endAyah=hadrPrefs.getInt("q7h_range_ayah_end_a",-1)
+        val endSurah=hadrPrefs.getInt(rangeKey("q7h_range_ayah_end_s"),-1)
+        val endAyah=hadrPrefs.getInt(rangeKey("q7h_range_ayah_end_a"),-1)
         if (!QuranCatalog.isValidAyah(endSurah,endAyah)) return false
         val mode=currentAyahMode()
         val next=QuranCatalog.nextAyah(surah,verse)
@@ -273,21 +291,21 @@ class PlaybackService : MediaSessionService() {
             playRangeVerse(next.first,next.second,fields[3],fields[4])
             return true
         }
-        val startS=hadrPrefs.getInt("q7h_range_ayah_start_s",surah)
-        val startA=hadrPrefs.getInt("q7h_range_ayah_start_a",verse)
+        val startS=hadrPrefs.getInt(rangeKey("q7h_range_ayah_start_s"),surah)
+        val startA=hadrPrefs.getInt(rangeKey("q7h_range_ayah_start_a"),verse)
         val allowedPasses = when (mode) {
             AyahEndMode.ALL_RECITERS -> hadrPrefs.getInt("ayah_all_reciters_repeat_count",1)
             AyahEndMode.REPEAT_N -> hadrPrefs.getInt("ayah_repeat_n",3)
             else -> 1
         }.coerceIn(1,1000)
-        ayahRangePasses++
-        if (!error && (mode == AyahEndMode.REPEAT || ayahRangePasses < allowedPasses)) {
+        ayahState.rangePasses++
+        if (!error && (mode == AyahEndMode.REPEAT || ayahState.rangePasses < allowedPasses)) {
             playRangeVerse(startS,startA,fields[3],fields[4])
             return true
         }
-        ayahRangePasses=0
+        ayahState.rangePasses=0
         if (mode == AyahEndMode.NEXT) {
-            hadrPrefs.edit().putBoolean("q7h_range_ayah_enabled",false).apply()
+            hadrPrefs.edit().putBoolean(rangeKey("q7h_range_ayah_enabled"),false).apply()
             val following=QuranCatalog.nextAyah(surah,verse)
             if (following != null) {
                 playRangeVerse(following.first,following.second,fields[3],fields[4])
@@ -298,21 +316,21 @@ class PlaybackService : MediaSessionService() {
         if (mode == AyahEndMode.ALL_RECITERS) {
             val all=orderedReciters()
             val at=all.indexOfFirst { it.repository == fields[3] && it.branch == fields[4] }
-            if (at>=0 && ayahRangeReciter+1<all.size) {
-                ayahRangeReciter++
+            if (at>=0 && ayahState.rangeReciter+1<all.size) {
+                ayahState.rangeReciter++
                 val nextReciter=all[(at+1) % all.size]
                 playRangeVerse(startS,startA,nextReciter.repository,nextReciter.branch)
                 return true
             }
         }
-        hadrPrefs.edit().putBoolean("q7h_range_ayah_enabled",false).apply()
+        hadrPrefs.edit().putBoolean(rangeKey("q7h_range_ayah_enabled"),false).apply()
         return true
     }
 
     private fun playRangeVerse(surah:Int,verse:Int,repository:String,branch:String) {
         if (!QuranCatalog.isValidAyah(surah,verse)) return
         val reciter=Reciter(repository,branch)
-        internalAyahTransition=true
+        ayahState.internalTransition=true
         ayah.setMediaItem(MediaItem.Builder()
             .setMediaId("ayah:$surah:$verse:$repository:$branch")
             .setUri(reciter.audioUrl(surah,verse)).build())
@@ -323,7 +341,7 @@ class PlaybackService : MediaSessionService() {
 
     /** Dedicated finite playback machine; NEVER enqueue 43 * 1000 MP3 items. */
     private fun onSpecialAyahFinished(error: Boolean = false) {
-        if (!::ayah.isInitialized) return
+        if (!::tafsirAyah.isInitialized) return
         val mode = currentAyahMode()
         if (mode != AyahEndMode.REPEAT_N && mode != AyahEndMode.ALL_RECITERS) return
         val parts = ayah.currentMediaItem?.mediaId.orEmpty().split(':')
@@ -332,10 +350,10 @@ class PlaybackService : MediaSessionService() {
         val verse = parts[2].toIntOrNull() ?: return
         if (!QuranCatalog.isValidAyah(surah, verse)) return
         val key = "$surah:$verse:${mode.name}"
-        if (ayahCycleKey != key) {
-            ayahCycleKey = key
-            ayahPlayedForCurrentReciter = 0
-            ayahRecitersCompleted = 0
+        if (ayahState.cycleKey != key) {
+            ayahState.cycleKey = key
+            ayahState.playedForCurrentReciter = 0
+            ayahState.recitersCompleted = 0
         }
         val n = when (mode) {
             AyahEndMode.ALL_RECITERS -> hadrPrefs.getInt("ayah_all_reciters_repeat_count", 1)
@@ -343,33 +361,70 @@ class PlaybackService : MediaSessionService() {
         }.coerceIn(1, 1000)
 
         // A network 404 is skipped rather than retried a thousand times.
-        if (!error && ayahPlayedForCurrentReciter + 1 < n) {
-            ayahPlayedForCurrentReciter++
-            internalAyahSeek = true
+        if (!error && ayahState.playedForCurrentReciter + 1 < n) {
+            ayahState.playedForCurrentReciter++
+            ayahState.internalSeek = true
             ayah.seekTo(0L)
             ayah.play()
             return
         }
-        ayahPlayedForCurrentReciter = 0
+        ayahState.playedForCurrentReciter = 0
         if (mode == AyahEndMode.REPEAT_N) {
             resetAyahCycle()
             return // Last of N repeats ended naturally.
         }
         val order = orderedReciters()
         val currentIndex = order.indexOfFirst { it.repository == parts[3] && it.branch == parts[4] }
-        ayahRecitersCompleted++
-        if (order.isEmpty() || currentIndex < 0 || ayahRecitersCompleted >= order.size) {
+        ayahState.recitersCompleted++
+        if (order.isEmpty() || currentIndex < 0 || ayahState.recitersCompleted >= order.size) {
             resetAyahCycle()
             return // Each available reciter has read the verse exactly N times.
         }
         val next = order[(currentIndex + 1) % order.size]
         val mediaId = "ayah:$surah:$verse:${next.repository}:${next.branch}"
-        internalAyahTransition = true
+        ayahState.internalTransition = true
         ayah.setMediaItem(MediaItem.Builder().setMediaId(mediaId)
             .setUri(next.audioUrl(surah, verse)).build())
         ayah.repeatMode = Player.REPEAT_MODE_OFF
         ayah.prepare()
         ayah.play()
+    }
+
+    private fun ayahListener(channel: AudioChannel): Player.Listener = object : Player.Listener {
+        override fun onIsPlayingChanged(isPlaying: Boolean) = withAyahChannel(channel) {
+            if (isPlaying) {
+                hadr.pause()
+                if (channel == AudioChannel.HAFIZ) tafsirAyah.pause() else hafizAyah.pause()
+            }
+        }
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = withAyahChannel(channel) {
+            if (!ayahState.internalTransition) {
+                resetAyahCycle()
+                ayahState.rangePasses=0
+                ayahState.rangeReciter=0
+            }
+            ayahState.internalTransition=false
+            if (!hadrPrefs.getBoolean(rangeKey("q7h_range_ayah_enabled"),false)) updateNextAyah()
+        }
+        override fun onRepeatModeChanged(repeatMode: Int) = withAyahChannel(channel) {
+            if (!hadrPrefs.getBoolean(rangeKey("q7h_range_ayah_enabled"),false)) {
+                if (repeatMode == Player.REPEAT_MODE_ALL) updateNextAyah() else clearFollowingAyahs()
+            }
+        }
+        override fun onPlaybackStateChanged(playbackState: Int) = withAyahChannel(channel) {
+            if (playbackState == Player.STATE_ENDED && !onAyahRangeFinished(false)) onSpecialAyahFinished()
+        }
+        override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo, reason: Int) = withAyahChannel(channel) {
+            if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                if (!ayahState.internalSeek) resetAyahCycle()
+                ayahState.internalSeek=false
+            }
+        }
+        override fun onPlayerError(error: PlaybackException) = withAyahChannel(channel) {
+            Log.w("Q7H-Ayah", "Reciter stream failed; skipping this reciter",error)
+            if (!onAyahRangeFinished(true)) onSpecialAyahFinished(error=true)
+        }
     }
 
     override fun onCreate() {
@@ -384,13 +439,17 @@ class PlaybackService : MediaSessionService() {
             repeatMode = Player.REPEAT_MODE_OFF
             playWhenReady = false
         }
-        ayah = ExoPlayer.Builder(this).build().apply {
+        tafsirAyah = ExoPlayer.Builder(this).build().apply {
+            setAudioAttributes(audioAttributes, true)
+            setHandleAudioBecomingNoisy(true)
+        }
+        hafizAyah = ExoPlayer.Builder(this).build().apply {
             setAudioAttributes(audioAttributes, true)
             setHandleAudioBecomingNoisy(true)
         }
         hadr.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying) ayah.pause()
+                if (isPlaying) { tafsirAyah.pause(); hafizAyah.pause() }
                 saveHadrPosition(force = true)
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -431,48 +490,17 @@ class PlaybackService : MediaSessionService() {
                 Log.e("Q7H-Hadr", "Ошибка чтения / декодирования quran_7_hours.mp3", error)
             }
         })
-        ayah.addListener(object : Player.Listener {
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying) hadr.pause()
-            }
-            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                if (!internalAyahTransition) {
-                    resetAyahCycle()
-                    ayahRangePasses=0
-                    ayahRangeReciter=0
-                }
-                internalAyahTransition = false
-                if (!hadrPrefs.getBoolean("q7h_range_ayah_enabled",false)) updateNextAyah()
-            }
-            override fun onRepeatModeChanged(repeatMode: Int) {
-                if (hadrPrefs.getBoolean("q7h_range_ayah_enabled",false)) return
-                if (repeatMode == Player.REPEAT_MODE_ALL) updateNextAyah()
-                else clearFollowingAyahs()
-            }
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_ENDED && !onAyahRangeFinished(false))
-                    onSpecialAyahFinished()
-            }
-            override fun onPositionDiscontinuity(
-                oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int
-            ) {
-                if (reason == Player.DISCONTINUITY_REASON_SEEK) {
-                    if (!internalAyahSeek) resetAyahCycle()
-                    internalAyahSeek = false
-                }
-            }
-            override fun onPlayerError(error: PlaybackException) {
-                Log.w("Q7H-Ayah", "Reciter stream failed; skipping this reciter", error)
-                if (!onAyahRangeFinished(true)) onSpecialAyahFinished(error = true)
-            }
-        })
+        tafsirAyah.addListener(ayahListener(AudioChannel.AYAH))
+        hafizAyah.addListener(ayahListener(AudioChannel.HAFIZ))
         restoreHadrOnLaunch()
         hadrSession = MediaSession.Builder(this, hadr).setId("q7h_hadr").build()
-        ayahSession = MediaSession.Builder(this, ayah).setId("q7h_ayah").build()
+        ayahSession = MediaSession.Builder(this, tafsirAyah).setId("q7h_ayah").build()
+        hafizSession = MediaSession.Builder(this, hafizAyah).setId("q7h_hafiz").build()
         persistenceScope.launch {
             while (isActive) {
                 delay(150L)
-                applyRequestedAyahSeek()
+                withAyahChannel(AudioChannel.AYAH) { applyRequestedAyahSeek() }
+                withAyahChannel(AudioChannel.HAFIZ) { applyRequestedAyahSeek() }
                 if (hadr.isPlaying) {
                     applyHadrSegmentMode()
                     val now = android.os.SystemClock.elapsedRealtime()
@@ -483,8 +511,11 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession =
-        if (controllerInfo.connectionHints.getString(CHANNEL_HINT) == AudioChannel.AYAH.key)
-            ayahSession else hadrSession
+        when(controllerInfo.connectionHints.getString(CHANNEL_HINT)) {
+            AudioChannel.AYAH.key -> ayahSession
+            AudioChannel.HAFIZ.key -> hafizSession
+            else -> hadrSession
+        }
 
     private fun clearFollowingAyahs() {
         val index = ayah.currentMediaItemIndex
@@ -494,7 +525,7 @@ class PlaybackService : MediaSessionService() {
 
     /** Existing NEXT mode: append the next verse in the same reciter. */
     private fun updateNextAyah() {
-        if (hadrPrefs.getBoolean("q7h_range_ayah_enabled",false) ||
+        if (hadrPrefs.getBoolean(rangeKey("q7h_range_ayah_enabled"),false) ||
             ayah.repeatMode != Player.REPEAT_MODE_ALL) return
         val fields = ayah.currentMediaItem?.mediaId.orEmpty().split(':')
         if (fields.size != 5 || fields[0] != "ayah") return
@@ -533,8 +564,10 @@ class PlaybackService : MediaSessionService() {
         saveHadrPosition(force = true)
         hadrSession.release()
         ayahSession.release()
+        hafizSession.release()
         hadr.release()
-        ayah.release()
+        tafsirAyah.release()
+        hafizAyah.release()
         super.onDestroy()
     }
 }

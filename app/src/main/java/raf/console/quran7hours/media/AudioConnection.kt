@@ -20,7 +20,7 @@ enum class PrefacePart(val fileName: String, val title: String) {
     BASMALA("basmala.mp3", "Басмала")
 }
 
-enum class AudioChannel(val key: String) { HADR("hadr"), AYAH("ayah") }
+enum class AudioChannel(val key: String) { HADR("hadr"), AYAH("ayah"), HAFIZ("hafiz") }
 
 /** FIVE mutually exclusive modes of ayah playback. */
 enum class AyahEndMode(val title: String) {
@@ -78,8 +78,8 @@ class AudioConnection(context: Context, private val channel: AudioChannel) {
     }
 
     fun playAyah(reciter: Reciter, surah: Int, ayah: Int, endMode: AyahEndMode) {
-        if (channel != AudioChannel.AYAH || !QuranCatalog.isValidAyah(surah, ayah)) return
-        Q7HRangeState.clearAyah(app) // Explicit single-ayah tap overrides old range.
+        if (channel == AudioChannel.HADR || !QuranCatalog.isValidAyah(surah, ayah)) return
+        Q7HRangeState.clearAyah(app,channel) // Explicit single-ayah tap overrides old range.
         val id = "ayah:$surah:$ayah:${reciter.repository}:${reciter.branch}"
         // The service gets an explicit new playlist on every new request: reset its N counters.
         controller?.run {
@@ -93,8 +93,8 @@ class AudioConnection(context: Context, private val channel: AudioChannel) {
     /** Start an inclusive interval; Service streams one item at a time (no giant queue). */
     fun playAyahRange(reciter: Reciter, fromSurah: Int, fromAyah: Int,
                       toSurah: Int, toAyah: Int, mode: AyahEndMode) {
-        if (channel != AudioChannel.AYAH) return
-        if (!Q7HRangeState.ayah(app,fromSurah,fromAyah,toSurah,toAyah,mode)) return
+        if (channel == AudioChannel.HADR) return
+        if (!Q7HRangeState.ayah(app,fromSurah,fromAyah,toSurah,toAyah,mode,channel)) return
         val id = "ayah:$fromSurah:$fromAyah:${reciter.repository}:${reciter.branch}"
         controller?.run {
             setMediaItem(MediaItem.Builder().setMediaId(id)
@@ -106,8 +106,8 @@ class AudioConnection(context: Context, private val channel: AudioChannel) {
     }
 
     fun playPreface(part: PrefacePart) {
-        if (channel != AudioChannel.AYAH) return
-        Q7HRangeState.clearAyah(app)
+        if (channel == AudioChannel.HADR) return
+        Q7HRangeState.clearAyah(app,channel)
         val uri = Uri.parse("asset:///quran/${part.fileName}")
         controller?.run {
             setMediaItem(MediaItem.Builder().setMediaId("preface:${part.name}").setUri(uri).build())
@@ -118,8 +118,8 @@ class AudioConnection(context: Context, private val channel: AudioChannel) {
     }
 
     fun setAyahEndMode(mode: AyahEndMode) {
-        if (channel == AudioChannel.AYAH) {
-            controller?.repeatMode = if (Q7HRangeState.ayahActive(app))
+        if (channel != AudioChannel.HADR) {
+            controller?.repeatMode = if (Q7HRangeState.ayahActive(app,channel))
                 Player.REPEAT_MODE_OFF else mode.toRepeatMode()
         }
     }

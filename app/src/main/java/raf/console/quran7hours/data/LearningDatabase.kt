@@ -35,6 +35,16 @@ data class LearningNote(
     val updatedAt: Long = 0
 )
 
+/** Saved in Room: name, editable color, position and a teacher-defined use. */
+data class InkPaletteColor(
+    val id: Long,
+    val argb: Long,
+    val purpose: String,
+    val sortOrder: Int,
+    val tajweed: Boolean,
+    val custom: Boolean
+)
+
 data class InkPoint(val x: Float, val y: Float)
 
 data class InkStroke(
@@ -110,6 +120,34 @@ class LearningDatabase(private val appContext: Context) {
         Triple("Читаю регулярно", "repeat", 0xFFCF7485L)
     )
 
+    private val initialInkColors = listOf(
+        0xFF999999L to "Не произносится",
+        0xFFDED537L to "Мадд — удлинение (2 хараката)",
+        0xFFFE7D03L to "Мадд мунфасыль",
+        0xFFFF4D8EL to "Мадд муттасыль",
+        0xFFE30000L to "Мадд лазим",
+        0xFF26B55DL to "Гунна и ихфа",
+        0xFF00DEFFL to "Калькаля",
+        0xFF3C84D5L to "Тафхим",
+        0xFFE64F4FL to "Красный мягкий",
+        0xFFFFC848L to "Жёлтый",
+        0xFF4EA6DAL to "Голубой",
+        0xFF4DAD74L to "Зелёный",
+        0xFFAF72DCL to "Фиолетовый",
+        0xFF202020L to "Чёрный",
+        0xFFFFFFFFL to "Белый",
+        0xFF795548L to "Коричневый",
+        0xFFD8C5A6L to "Бежевый",
+        0xFFF2A444L to "Оранжевый",
+        0xFF1F5CAAL to "Синий",
+        0xFFED9DBFL to "Розовый",
+        0xFF00B8A9L to "Бирюзовый",
+        0xFF8C9A3AL to "Оливковый",
+        0xFF666666L to "Тёмно-серый",
+        0xFF9AE6B4L to "Мятный",
+        0xFFA3A1EEL to "Лавандовый"
+    )
+
     /** Exactly-once import marker is committed IN THE SAME Room transaction as all rows. */
     init {
         io {
@@ -133,6 +171,36 @@ class LearningDatabase(private val appContext: Context) {
                         }
                         dao.putMeta(LearningMetaEntity("legacy_import_v1", "complete"))
                     }
+                }
+            }
+        }
+        // First-launch seed after Room's 1 -> 2 additive migration; never re-seed user deletions.
+        io {
+            db.withTransaction {
+                if (dao.meta("ink_palette_seed_v1") != "complete") {
+                    if (dao.inkColors().isEmpty()) {
+                        initialInkColors.forEachIndexed { index, (color, meaning) ->
+                            dao.putInkColor(InkColorEntity(
+                                argb = color, purpose = meaning, sortOrder = index,
+                                isTajweed = if (index < 8) 1 else 0))
+                        }
+                    }
+                    dao.putMeta(LearningMetaEntity("ink_palette_seed_v1", "complete"))
+                }
+            }
+        }
+        // Add the five new colors to existing Room installations exactly once.
+        // Do not recreate deleted/renamed user categories on every launch.
+        io {
+            db.withTransaction {
+                if (dao.meta("palette_neutral_v1") != "complete") {
+                    val existing = dao.types().map { it.name }.toSet()
+                    BookmarkColors.defaults.takeLast(5).forEach { (name, color) ->
+                        if (name !in existing) dao.insertType(
+                            BookmarkTypeEntity(name = name, color = color, icon = "bookmark", uuid = uuid())
+                        )
+                    }
+                    dao.putMeta(LearningMetaEntity("palette_neutral_v1", "complete"))
                 }
             }
         }
@@ -167,7 +235,7 @@ class LearningDatabase(private val appContext: Context) {
             color = color and 0xFFFFFFFFL, icon = icon, isCustom = 1, uuid = uuid()))
         else {
             val old = requireNotNull(dao.typeById(id))
-            dao.updateType(old.copy(name = name.trim(), purpose = purpose.trim(), color = color and 0xFFFFFFFFL))
+            dao.updateType(old.copy(name = name.trim(), purpose = purpose.trim(), color = color and 0xFFFFFFFFL, icon = icon))
             id
         }
     }
@@ -237,7 +305,9 @@ class LearningDatabase(private val appContext: Context) {
             strokes.forEach { stroke ->
                 put(JSONObject().apply {
                     put("tool", stroke.tool); put("color", stroke.color); put("width", stroke.width)
-                    if (stroke.tool == "text") put("text", stroke.text)
+                    // Stage12 smart:surah:ayah:page tags are required to clear
+                    // only a chosen verse after an app restart/backup restore.
+                    if (stroke.text.isNotEmpty()) put("text", stroke.text)
                     put("points", JSONArray().apply {
                         stroke.points.forEach { p -> put(JSONArray().put(p.x.toDouble()).put(p.y.toDouble())) }
                     })
@@ -248,4 +318,44 @@ class LearningDatabase(private val appContext: Context) {
         dao.putAnnotation(PageAnnotationEntity(page, arr.toString(), System.currentTimeMillis(), old?.uuid ?: uuid()))
         Unit
     }
+    /** Palette is authoritative in Room, and automatically part of the DB ZIP snapshot. */
+    fun inkColors(): List<InkPaletteColor> = io {
+        dao.inkColors().map { row -> InkPaletteColor(row.id,row.argb,row.purpose,row.sortOrder,
+            row.isTajweed == 1,row.isCustom == 1) }
+    }
+    fun addInkColor(color: Long, purpose: String) = io {
+        val rows=dao.inkColors()
+        dao.putInkColor(InkColorEntity(argb=color and 0xFFFFFFFFL,
+            purpose=purpose.take(120), sortOrder=(rows.maxOfOrNull { it.sortOrder } ?: -1)+1,
+            isCustom=1))
+        Unit
+    }
+    fun updateInkPurpose(id: Long, purpose: String) = io {
+        dao.inkColors().firstOrNull { it.id==id }?.let {
+            dao.updateInkColor(it.copy(purpose=purpose.take(160)))
+        }
+    }
+    fun updateInkColor(id: Long, color: Long) = io {
+        dao.inkColors().firstOrNull { it.id==id }?.let {
+            dao.updateInkColor(it.copy(argb=color and 0xFFFFFFFFL))
+        }
+    }
+    fun moveInkColor(id: Long, delta: Int) = io {
+        db.withTransaction {
+            val rows=dao.inkColors()
+            val index=rows.indexOfFirst { it.id==id }
+            val dest=index+delta
+            if(index in rows.indices && dest in rows.indices) {
+                // Reindex in-memory to repair legacy duplicates before swapping.
+                rows.toMutableList().apply {
+                    val target=removeAt(index)
+                    add(dest,target)
+                }.forEachIndexed { order, row ->
+                    if(row.sortOrder!=order) dao.updateInkColor(row.copy(sortOrder=order))
+                }
+            }
+        }
+    }
+    fun deleteInkColor(id: Long) = io { dao.deleteCustomInkColor(id) }
+
 }

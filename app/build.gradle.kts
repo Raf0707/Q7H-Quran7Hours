@@ -183,6 +183,16 @@ dependencies {
         "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2"
     )
 
+    // Periodic local user-data backups (WorkManager 2.12.0)
+    implementation("androidx.work:work-runtime-ktx:2.12.0")
+
+    val work_version = "2.12.0"
+
+    // Для Java
+    implementation("androidx.work:work-runtime:$work_version")
+    // Для Kotlin (рекомендуется)
+    implementation("androidx.work:work-runtime-ktx:$work_version")
+
     // ==========================================
     // TESTING
     // ==========================================

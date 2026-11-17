@@ -13,7 +13,11 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.InputStream
+import java.io.ByteArrayOutputStream
 import java.util.Locale
+import java.util.WeakHashMap
+import java.util.Collections
+import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 import kotlin.math.max
@@ -24,6 +28,34 @@ class MushafStore(private val context: Context) {
     private val memoryBudgetBytes = if (lowMemory) 20 * 1024 * 1024 else
         (Runtime.getRuntime().maxMemory() / 6L).coerceIn(48L*1024*1024, 80L*1024*1024).toInt()
     private val decodeLocks = ConcurrentHashMap<String, Mutex>()
+    /** Exact mapping from original WebP pixels to the cropped Bitmap displayed by Compose.
+     * Weak keys prevent metadata retaining bitmaps after the decode cache evicts them. */
+    data class ImageFrame(
+        val sourceWidth: Int, val sourceHeight: Int,
+        val decodedWidth: Int, val decodedHeight: Int,
+        val cropLeft: Int, val cropTop: Int,
+        val visibleWidth: Int, val visibleHeight: Int,
+        val sourceSha256: ByteArray?,
+    )
+    private val imageFrames = Collections.synchronizedMap(WeakHashMap<Bitmap, ImageFrame>())
+    fun imageFrame(bitmap: Bitmap): ImageFrame? = imageFrames[bitmap]
+
+    private data class Trimmed(val bitmap: Bitmap, val left: Int, val top: Int)
+    // A downloaded image may be unexpectedly large. Keep the extra trust check
+    // bounded; an oversized file still decodes normally but uses the v7 fallback.
+    private fun tryReadSmallSource(source: Source): ByteArray? = runCatching {
+        source.open(context).use { input ->
+            val out = ByteArrayOutputStream()
+            val buffer = ByteArray(8192)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                if (out.size() + count > 4 * 1024 * 1024) return@use null
+                out.write(buffer, 0, count)
+            }
+            out.toByteArray()
+        }
+    }.getOrNull()
     private val cache = object : LruCache<String,Bitmap>(memoryBudgetBytes) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
@@ -89,9 +121,15 @@ class MushafStore(private val context: Context) {
                 var found = false
                 var reason: String? = null
                 for (source in candidates(kind,number)) {
+                    // Stage 11: verify the immutable original bytes for ALL four variants.
+                    // Decode and hash the same bytes to avoid races with extraction.
+                    // Modified / oversized images still load but safely use v7.
+                    val trustedBytes = tryReadSmallSource(source)
                     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                     try {
-                        source.open(context).use { BitmapFactory.decodeStream(it, null, bounds) }
+                        if (trustedBytes != null)
+                            BitmapFactory.decodeByteArray(trustedBytes,0,trustedBytes.size,bounds)
+                        else source.open(context).use { BitmapFactory.decodeStream(it, null, bounds) }
                     } catch (_: java.io.FileNotFoundException) {
                         continue
                     } catch (e: Exception) {
@@ -111,13 +149,25 @@ class MushafStore(private val context: Context) {
                         inPreferredConfig = if (lowMemory) Bitmap.Config.RGB_565 else Bitmap.Config.ARGB_8888
                     }
                     val decoded = try {
-                        source.open(context).use { BitmapFactory.decodeStream(it, null, options) }
+                        if (trustedBytes != null)
+                            BitmapFactory.decodeByteArray(trustedBytes,0,trustedBytes.size,options)
+                        else source.open(context).use { BitmapFactory.decodeStream(it, null, options) }
                     } catch (e: Exception) {
                         reason = "${source.label}: ${e.message}"
                         null
                     }
                     if (decoded != null) {
-                        val output = trimFlatMargins(decoded)
+                        val trimmed = trimFlatMargins(decoded)
+                        val output = trimmed.bitmap
+                        // Source SHA is checked against the appropriate variant/page in Q7S2.
+                        // Any modified/recompressed image uses the v7 selector.
+                        val rawDigest = trustedBytes?.let { bytes ->
+                            MessageDigest.getInstance("SHA-256").digest(bytes)
+                        }
+                        imageFrames[output] = ImageFrame(
+                            bounds.outWidth, bounds.outHeight, decoded.width, decoded.height,
+                            trimmed.left, trimmed.top, output.width, output.height, rawDigest
+                        )
                         synchronized(cache) { cache.put(key, output) }
                         Log.d("Q7HMushaf", "Page $number ${kind.name} from ${source.label}")
                         return@withLock output
@@ -139,9 +189,9 @@ class MushafStore(private val context: Context) {
         return android.graphics.Color.rgb(median(16),median(8),median(0))
     }
     /** Preserve the former page cropping policy. Never remove Quran ink near edges. */
-    private fun trimFlatMargins(bitmap: Bitmap): Bitmap {
+    private fun trimFlatMargins(bitmap: Bitmap): Trimmed {
         val width=bitmap.width; val height=bitmap.height
-        if(width<250 || height<350) return bitmap
+        if(width<250 || height<350) return Trimmed(bitmap,0,0)
         val background=bitmap.getPixel(1,1)
         fun different(c:Int):Boolean {
             val dr=abs(((c shr 16) and 255)-((background shr 16) and 255))
@@ -167,7 +217,7 @@ class MushafStore(private val context: Context) {
         while(bottom>height-maxY && !row(bottom))bottom--
         left=(left-5).coerceAtLeast(0);right=(right+5).coerceAtMost(width-1)
         top=(top-4).coerceAtLeast(0);bottom=(bottom+4).coerceAtMost(height-1)
-        if(left==0 && right==width-1 && top==0 && bottom==height-1)return bitmap
-        return Bitmap.createBitmap(bitmap,left,top,right-left+1,bottom-top+1)
+        if(left==0 && right==width-1 && top==0 && bottom==height-1)return Trimmed(bitmap,0,0)
+        return Trimmed(Bitmap.createBitmap(bitmap,left,top,right-left+1,bottom-top+1),left,top)
     }
 }

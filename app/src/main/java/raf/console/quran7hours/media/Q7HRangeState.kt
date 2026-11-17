@@ -30,47 +30,50 @@ object Q7HRangeState {
             prefs.getInt("q7h_range_hadr_end",1),prefs.getString("q7h_range_hadr_mode","STOP") ?: "STOP")
     }
 
-    fun ayahRange(context: Context):Q7HAyahRange? {
+    private fun key(base:String, channel:AudioChannel):String =
+        if (channel == AudioChannel.HAFIZ) base.replace("q7h_range_ayah_","q7h_range_hafiz_")
+            .replace("q7h_ayah_seek_","q7h_hafiz_seek_") else base
+    fun ayahRange(context: Context, channel:AudioChannel = AudioChannel.AYAH):Q7HAyahRange? {
         val prefs=p(context)
-        if(!prefs.getBoolean("q7h_range_ayah_enabled",false)) return null
-        val fromS=prefs.getInt("q7h_range_ayah_start_s",-1)
-        val fromA=prefs.getInt("q7h_range_ayah_start_a",-1)
-        val toS=prefs.getInt("q7h_range_ayah_end_s",-1)
-        val toA=prefs.getInt("q7h_range_ayah_end_a",-1)
+        if(!prefs.getBoolean(key("q7h_range_ayah_enabled",channel),false)) return null
+        val fromS=prefs.getInt(key("q7h_range_ayah_start_s",channel),-1)
+        val fromA=prefs.getInt(key("q7h_range_ayah_start_a",channel),-1)
+        val toS=prefs.getInt(key("q7h_range_ayah_end_s",channel),-1)
+        val toA=prefs.getInt(key("q7h_range_ayah_end_a",channel),-1)
         if(!QuranCatalog.isValidAyah(fromS,fromA) || !QuranCatalog.isValidAyah(toS,toA)) return null
         return Q7HAyahRange(fromS,fromA,toS,toA)
     }
 
     /** Seek within an existing Ayah range; service preserves original A/B endpoints. */
-    fun requestAyahSeek(context:Context,surah:Int,ayah:Int):Boolean {
-        val r=ayahRange(context) ?: return false
+    fun requestAyahSeek(context:Context,surah:Int,ayah:Int,channel:AudioChannel = AudioChannel.AYAH):Boolean {
+        val r=ayahRange(context,channel) ?: return false
         if(!QuranCatalog.isValidAyah(surah,ayah)) return false
         if ((surah<r.fromSurah || surah==r.fromSurah && ayah<r.fromAyah) ||
             (surah>r.toSurah || surah==r.toSurah && ayah>r.toAyah)) return false
         val prefs=p(context)
         return prefs.edit()
-            .putInt("q7h_ayah_seek_target_s",surah)
-            .putInt("q7h_ayah_seek_target_a",ayah)
-            .putInt("q7h_ayah_seek_generation",prefs.getInt("q7h_ayah_seek_generation",0)+1)
+            .putInt(key("q7h_ayah_seek_target_s",channel),surah)
+            .putInt(key("q7h_ayah_seek_target_a",channel),ayah)
+            .putInt(key("q7h_ayah_seek_generation",channel),prefs.getInt(key("q7h_ayah_seek_generation",channel),0)+1)
             .commit()
     }
 
     fun clearHadr(context: Context) {
         p(context).edit().putBoolean("q7h_range_hadr_enabled",false).apply()
     }
-    fun ayah(context: Context, surah: Int, verse: Int, endSurah: Int, endVerse: Int, mode: AyahEndMode): Boolean {
+    fun ayah(context: Context, surah: Int, verse: Int, endSurah: Int, endVerse: Int, mode: AyahEndMode, channel:AudioChannel = AudioChannel.AYAH): Boolean {
         if (!QuranCatalog.isValidAyah(surah,verse) || !QuranCatalog.isValidAyah(endSurah,endVerse) ||
             endSurah < surah || endSurah == surah && endVerse < verse) return false
         return p(context).edit()
-            .putInt("q7h_range_ayah_start_s",surah)
-            .putInt("q7h_range_ayah_start_a",verse)
-            .putInt("q7h_range_ayah_end_s",endSurah)
-            .putInt("q7h_range_ayah_end_a",endVerse)
-            .putBoolean("q7h_range_ayah_enabled",true)
-            .putString("ayahEndMode",mode.name).commit()
+            .putInt(key("q7h_range_ayah_start_s",channel),surah)
+            .putInt(key("q7h_range_ayah_start_a",channel),verse)
+            .putInt(key("q7h_range_ayah_end_s",channel),endSurah)
+            .putInt(key("q7h_range_ayah_end_a",channel),endVerse)
+            .putBoolean(key("q7h_range_ayah_enabled",channel),true)
+            .putString(if(channel==AudioChannel.HAFIZ) "hafizEndMode" else "ayahEndMode",mode.name).commit()
     }
-    fun clearAyah(context: Context) {
-        p(context).edit().putBoolean("q7h_range_ayah_enabled",false).apply()
+    fun clearAyah(context: Context, channel:AudioChannel = AudioChannel.AYAH) {
+        p(context).edit().putBoolean(key("q7h_range_ayah_enabled",channel),false).apply()
     }
-    fun ayahActive(context: Context) = p(context).getBoolean("q7h_range_ayah_enabled",false)
+    fun ayahActive(context: Context, channel:AudioChannel = AudioChannel.AYAH) = p(context).getBoolean(key("q7h_range_ayah_enabled",channel),false)
 }

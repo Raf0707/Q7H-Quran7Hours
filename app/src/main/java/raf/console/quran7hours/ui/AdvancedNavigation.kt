@@ -360,59 +360,44 @@ internal fun PageJumpDialog(
     val preview by produceState("Загрузка сведений…",selectedPage,pages){
         value=selectedPage?.let{pages.summary(it)} ?: "Введите допустимое значение"
     }
-    // Prepare a MAXIMUM natural-height preview once. Keeping an invisible copy
-    // in the layout reserves exactly the height needed for the largest real
-    // multi-surah summary; dragging never changes AlertDialog's measured height.
-    val maximumPreview by produceState(
-        "Сура 112. Аль-Ихляс · аяты 1–4\nСура 113. Аль-Фаляк · аяты 1–5\n" +
-            "Сура 114. Ан-Нас · аяты 1–6\nДжуз 30, 4/4 · Хизб 60, 2/2 · Манзиль 7",
-        pages
-    ) {
-        value = withContext(Dispatchers.IO) {
-            // A suspend function cannot be invoked from Sequence.mapNotNull's
-            // non-suspending lambda. Iterate directly in the coroutine instead.
-            var longest: String? = null
-            var mostLines = -1
-            var mostChars = -1
-            for (n in 1..604) {
-                val candidate = try {
-                    pages.summary(n)
-                } catch (e: java.util.concurrent.CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    continue
-                }
-                val lines = candidate.count { ch -> ch == '\n' }
-                if (lines > mostLines || (lines == mostLines && candidate.length > mostChars)) {
-                    longest = candidate
-                    mostLines = lines
-                    mostChars = candidate.length
-                }
-            }
-            longest ?: value
-        }
-    }
+    // A short, max-three-line header makes measuring all 604 summaries unnecessary.
     val modes=listOf("ayah" to "Аят","page" to "Страница","juz" to "Джуз",
         "hizb" to "Хизб","manzil" to "Манзиль")
+    // An AlertDialog has a generous maximum height on modern phones. Reserve
+    // the space BETWEEN the summary and the fields, never between the fields and
+    // the bottom navigation tabs. The actual window height also matters on tablets.
+    val screenHeight = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp
+    val contentHeight = (screenHeight - 220).coerceIn(310, 490).dp
     AlertDialog(
         onDismissRequest=onDismiss,
         title={Text("Перейти")},
         text={
-            Column(Modifier.fillMaxWidth().heightIn(max=530.dp).then(
-                if (mode == "ayah" || mode == "page") Modifier.verticalScroll(rememberScrollState())
-                else Modifier),
-                verticalArrangement=Arrangement.spacedBy(10.dp)) {
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                    SingleChoiceSegmentedButtonRow(Modifier.width(475.dp)) {
-                        modes.forEachIndexed { i, (id,label) ->
-                            SegmentedButton(selected=mode==id,onClick={mode=id},
-                                shape=SegmentedButtonDefaults.itemShape(i,5),
-                                modifier=Modifier.weight(1f)){
-                                Text(label,maxLines=1,fontSize=11.sp)
-                            }
-                        }
-                    }
+            val ctx=androidx.compose.ui.platform.LocalContext.current
+            Q7HBottomNavSettings.load(ctx)
+            val lower=Q7HBottomNavSettings.enabled
+            Column(Modifier.fillMaxWidth().height(contentHeight),
+                verticalArrangement=Arrangement.spacedBy(7.dp)) {
+                // Information stays at the TOP; controls are scrollable in the middle.
+                Surface(color=MaterialTheme.colorScheme.surfaceVariant,
+                    shape=androidx.compose.foundation.shape.RoundedCornerShape(12.dp)) {
+                    Text(preview,Modifier.fillMaxWidth().padding(10.dp),
+                        style=MaterialTheme.typography.bodySmall,maxLines=3)
                 }
+                if (!lower) Q7HDialogNavModes(modes,mode) { mode=it }
+                Box(Modifier.fillMaxWidth().weight(1f)) {
+                    // This alignment fixes the "input at the top / tabs at the
+                    // bottom" gap on the Page tab. Ayah, Juz, Hizb and Manzil
+                    // use exactly the same bottom-anchored content region.
+                    Column(
+                        Modifier.fillMaxWidth().align(Alignment.BottomCenter)
+                            .heightIn(max=when(mode) {
+                                "page" -> 180.dp
+                                "ayah" -> 355.dp
+                                else -> 320.dp
+                            })
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement=Arrangement.spacedBy(9.dp)
+                    ) {
                 when(mode){
                     "ayah" -> {
                         NavigationNumberDropdown("Сура",surah,114,
@@ -445,7 +430,6 @@ internal fun PageJumpDialog(
                             "Хизб ${selectedPosition.hizb}, ${selectedPosition.hizbHalf}/2" +
                             (ayahPage?.let { " · Манзиль ${pages.v4.segmentForPage(QuranCatalog.Segment.MANZIL,it)}" } ?: ""),
                             style=MaterialTheme.typography.bodySmall)
-                        Q7HStableNavigationPreview(preview, maximumPreview)
                     }
                     "page" -> {
                         OutlinedTextField(value=input,onValueChange={input=it.filter(Char::isDigit).take(3)},
@@ -459,7 +443,6 @@ internal fun PageJumpDialog(
                             directionKey = Q7HSliderKeys.NAV_PAGE,
                             onValue = { input = it.toString() }
                         )
-                        Q7HStableNavigationPreview(preview, maximumPreview)
                     }
                     "juz","hizb","manzil" -> {
                         val kind=when(mode){"juz"->NavKind.JUZ;"hizb"->NavKind.HIZB;else->NavKind.MANZIL}
@@ -469,14 +452,17 @@ internal fun PageJumpDialog(
                             else->"7 манзилей · переход в начало манзиля"
                         },style=MaterialTheme.typography.labelSmall)
                         NavigationNodes(kind,mode,initialPage,pages,onGo,onGoAyah,
-                            modifier=Modifier.height(340.dp),
+                            modifier=Modifier.height(260.dp),
                             selectedNumber=when(kind){
                                 NavKind.JUZ->pages.v4.segmentForPage(QuranCatalog.Segment.JUZ,initialPage)
                                 NavKind.HIZB->pages.v4.segmentForPage(QuranCatalog.Segment.HIZB,initialPage)
                                 else->pages.v4.segmentForPage(QuranCatalog.Segment.MANZIL,initialPage)
                             })
                     }
-                }
+                } // when(mode)
+                    } // bottom-aligned fields
+                } // weighted area
+                if (lower) Q7HDialogNavModes(modes,mode) { mode=it }
             }
         },
         confirmButton={
@@ -489,6 +475,23 @@ internal fun PageJumpDialog(
     )
 }
 
+
+/** All five navigation segments fit in one horizontally scrollable bottom strip. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun Q7HDialogNavModes(modes: List<Pair<String,String>>,selected:String,onSelect:(String)->Unit) {
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+        SingleChoiceSegmentedButtonRow(Modifier.width(475.dp)) {
+            modes.forEachIndexed { i, (id,label) ->
+                SegmentedButton(selected=selected==id,onClick={onSelect(id)},
+                    shape=SegmentedButtonDefaults.itemShape(i,modes.size),
+                    modifier=Modifier.weight(1f),icon={}) {
+                    Text(label,maxLines=1,fontSize=11.sp)
+                }
+            }
+        }
+    }
+}
 
 /** The reference participates in measurement, but remains invisible. */
 @Composable

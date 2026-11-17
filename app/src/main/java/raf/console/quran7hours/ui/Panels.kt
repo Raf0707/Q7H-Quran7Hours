@@ -47,6 +47,8 @@ import raf.console.quran7hours.data.TafsirQuranScript
 import raf.console.quran7hours.data.TafsirStore
 import raf.console.quran7hours.data.WordByWordStore
 import raf.console.quran7hours.data.UserPreferences
+import raf.console.quran7hours.data.LearningDatabase
+import androidx.compose.foundation.text.selection.SelectionContainer
 import raf.console.quran7hours.data.AqidahVerseNotes
 import raf.console.quran7hours.data.Q7HAqidahDictionaryNotes
 import raf.console.quran7hours.data.QuranV4PageCatalog
@@ -74,6 +76,9 @@ private fun seekLabel(seconds: Int): String = when {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AudioPanel(
+    bottomNavEnabled: Boolean,
+    rangeRequest: Int,
+    onRangeRequestConsumed: () -> Unit,
     category: QuranCatalog.Segment,
     onCategory: (QuranCatalog.Segment) -> Unit,
     prefs: UserPreferences,
@@ -104,6 +109,9 @@ fun AudioPanel(
         }
     }
     var showHadrRange by remember { mutableStateOf(false) }
+    LaunchedEffect(rangeRequest) {
+        if (rangeRequest > 0) { showHadrRange = true; onRangeRequestConsumed() }
+    }
     if (showHadrRange) {
         Q7HHadrRangeDialog(category.title, marks.size, active,
             onDismiss={showHadrRange=false},
@@ -116,13 +124,13 @@ fun AudioPanel(
         Row(verticalAlignment=Alignment.CenterVertically,modifier=Modifier.fillMaxWidth()) {
             Text("Коран за 7 часов",style=MaterialTheme.typography.titleLarge,
                 modifier=Modifier.weight(1f).padding(start=16.dp,top=10.dp,bottom=8.dp))
-            TextButton(onClick={showHadrRange=true}) {
+            if (!bottomNavEnabled) TextButton(onClick={showHadrRange=true}) {
                 Icon(Icons.Default.Tune,contentDescription=null)
                 Spacer(Modifier.width(4.dp))
                 Text("Отрезок")
             }
         }
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+        if (!bottomNavEnabled) SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
             QuranCatalog.Segment.entries.forEachIndexed { index, value ->
                 SegmentedButton(
                     selected = category == value,
@@ -320,7 +328,10 @@ private fun HadrMiniPlayer(
 }
 /** Azan.ru tafsir keeps the same rich text design, with independent inline Ayah audio. */
 @Composable
-fun TafsirPanel(
+internal fun TafsirPanel(
+    bottomNavEnabled: Boolean,
+    rangeRequest: Int,
+    onRangeRequestConsumed: () -> Unit,
     prefs: UserPreferences,
     page: Int,
     store: TafsirStore,
@@ -337,6 +348,12 @@ fun TafsirPanel(
     onEndMode: (AyahEndMode) -> Unit,
     onPlayVerse: (Int, Int) -> Unit,
     onNoteAyah: (Int, Int) -> Unit,
+    onQuoteAyah: (Int, Int, String) -> Unit,
+    database: LearningDatabase,
+    jumpToAyah: Q7HAyahJump?,
+    onNavigate: () -> Unit,
+    onPanelClose: () -> Unit,
+    onPanelSection: (SheetSection) -> Unit,
     onPlayRange: (Int, Int, Int, Int, AyahEndMode) -> Unit,
     onPlayPreface: (PrefacePart) -> Unit,
     onPrevious: () -> Unit,
@@ -388,6 +405,9 @@ fun TafsirPanel(
     val v4ForRange = remember(context.applicationContext) { QuranV4PageCatalog(context.applicationContext) }
     val firstVerse = v4ForRange.first(page)
     var showAyahRange by remember { mutableStateOf(false) }
+    LaunchedEffect(rangeRequest) {
+        if (rangeRequest > 0) { showAyahRange = true; onRangeRequestConsumed() }
+    }
     if (showAyahRange) Q7HAyahRangeDialog(
         firstVerse?.surah ?: 1, firstVerse?.ayah ?: 1,
         onDismiss={showAyahRange=false},
@@ -397,7 +417,7 @@ fun TafsirPanel(
         }
     )
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
-        Row(modifier=Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.End) {
+        if (!bottomNavEnabled) Row(modifier=Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.End) {
             TextButton(onClick={showAyahRange=true}) {
                 Icon(Icons.Default.Tune,contentDescription=null)
                 Spacer(Modifier.width(5.dp))
@@ -435,6 +455,25 @@ fun TafsirPanel(
         LaunchedEffect(page) {
             if (pageChanged) prefs.savePanelViewport(viewportKey, 0, 0)
             prefs.savePanelViewport(lastViewedKey, page, 0)
+        }
+        LaunchedEffect(jumpToAyah?.revision, page, loadedVerses) {
+            val jump = jumpToAyah
+            if (jump != null && jump.section == SheetSection.TAFSIR) {
+                var index = if (page == 1) 1 else 0
+                var hit = false
+                loadedVerses.forEachIndexed { number, verse ->
+                    if (!hit) {
+                        if ((number == 0 || loadedVerses[number-1].surah != verse.surah) &&
+                            introductions.any { it.surah == verse.surah }) index++
+                        if (verse.surah == jump.surah && verse.ayah == jump.ayah) hit = true
+                        else index++
+                    }
+                }
+                if (hit) {
+                    listState.scrollToItem(index,0)
+                    Q7HAyahJumpBus.finish(jump)
+                }
+            }
         }
         PersistLazyViewport(listState, prefs, viewportKey)
         LazyColumn(
@@ -507,7 +546,8 @@ fun TafsirPanel(
                                     showTafsir = display.showTafsir,
                                     order = display.blockOrder
                                 ),
-                                onNote = onNoteAyah
+                                onNote = onNoteAyah,
+                                database = database
                             )
                         }
                         if (display.showArabic &&
@@ -583,13 +623,15 @@ fun TafsirPanel(
                                 }
                             }
                         }
+                        if (verse.explanation.isNotBlank()) {
+                            Q7HQuoteAction(verse.surah,verse.ayah,verse.explanation,onQuoteAyah)
+                        }
                     }
                 }
                 } // item(ayah)
             } // forEachIndexed
         }
     }
-        Q7HAyahSecondaryRangeSlider(playback)
         val tafsirPlayerTarget = q7hAyahMiniTarget(verses.orEmpty(), playback)
         if (tafsirPlayerTarget != null) {
             Q7HAyahMiniPlayer(
@@ -601,27 +643,10 @@ fun TafsirPanel(
                 onPlayVerse = onPlayVerse
             )
         }
-        // Fixed navigation bar: always accessible, even when the tafsir is very long.
-        // Right-to-left Mushaf navigation: left = next page; right = previous page.
+        Q7HRangeBelowPlayer(SheetSection.TAFSIR,playback,controller)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        Row(
-            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(vertical = 2.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onNext, enabled = page < 604) {
-                Icon(Icons.Default.ChevronLeft, contentDescription = "Следующая страница")
-            }
-            Text(
-                text = page.toString(),
-                modifier = Modifier.widthIn(min = 72.dp),
-                textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.titleLarge
-            )
-            IconButton(onClick = onPrevious, enabled = page > 1) {
-                Icon(Icons.Default.ChevronRight, contentDescription = "Предыдущая страница")
-            }
-        }
+        if (!bottomNavEnabled) Q7HPanelFooter(page,SheetSection.TAFSIR,onPrevious,onNext,onNavigate,
+            onPanelClose,onPanelSection)
     }
 }
 /** A zero-ayah (surah introduction) from the *same* Azan.ru page JSON.
@@ -818,20 +843,21 @@ internal fun AyahAudioControls(
     // The recorder's current mediaId is NEVER the user's saved reciter preference.
     // GitHub repo aliases are recognized without depending on their position in the list.
     fun findReciter(id: String): Reciter? = reciters.firstOrNull { it.repository == id }
-    val suwaid = reciters.firstOrNull {
-        it.repository.removePrefix("q7h_").lowercase() in setOf("aymansowaid", "aymansuwaid")
+    val defaultShatri = reciters.firstOrNull {
+        it.repository.removePrefix("q7h_").lowercase() in
+            setOf("shatri", "abubakrshatri", "abubakrashshaatree")
     }
     fun preferredForPerson(): Reciter? {
         findReciter(prefs.manuallySelectedReciter)?.let { return it }
         // Migration: older builds only stored selectedReciter. The first entry
         // was picked automatically; other stored entries are treated as manual.
         val oldChosen = selectedReciter.takeIf { it.isNotBlank() &&
-            it != reciters.firstOrNull()?.repository }
+            it != defaultShatri?.repository && it != reciters.firstOrNull()?.repository }
         findReciter(oldChosen.orEmpty())?.let {
             prefs.manuallySelectedReciter = it.repository
             return it
         }
-        return suwaid ?: reciters.firstOrNull()
+        return defaultShatri ?: reciters.firstOrNull()
     }
     val miniContext = LocalContext.current
     val miniDirection = remember(miniContext.applicationContext) {
@@ -897,8 +923,7 @@ internal fun AyahAudioControls(
             }
             IconButton(onClick = {
                 when {
-                    // Entering Person mode never changes the personal choice. Ayman
-                    // Rushdi Suwaid is the default ONLY if no choice was ever made.
+                    // Entering Person mode never changes the personal choice. Abu Bakr ash-Shatri is the default if no choice was made.
                     nextMode == AyahEndMode.ALL_RECITERS -> {
                         val preferred = preferredForPerson()
                         if (preferred != null) {
@@ -1018,6 +1043,7 @@ fun SettingsPanel(
     tajweed: Boolean, setTajweed: (Boolean) -> Unit,
     autoFlip: Boolean, setAutoFlip: (Boolean) -> Unit,
     keepAwake: Boolean, setKeepAwake: (Boolean) -> Unit,
+    separateHafiz: Boolean, setSeparateHafiz: (Boolean) -> Unit,
     mushaf: MushafStore
 ) {
     val scroll = rememberScrollState(initial = prefs.panelViewport("settings").second)
@@ -1048,6 +1074,8 @@ fun SettingsPanel(
         Q7HTajweedColorLegend(
             dark = mode == "dark" || (mode == "system" && isSystemInDarkTheme())
         )
+        HorizontalDivider()
+        Q7HInkSettingsSection(prefs)
         HorizontalDivider()
         Text("Оформление и чтение", style = MaterialTheme.typography.headlineSmall)
         Text("Тема", style = MaterialTheme.typography.titleMedium)
@@ -1085,6 +1113,13 @@ fun SettingsPanel(
         SettingsSwitch("Таджвид", tajweed, setTajweed)
         SettingsSwitch("Автоматическое перелистывание по проверенным таймингам", autoFlip, setAutoFlip)
         SettingsSwitch("Не выключать экран", keepAwake, setKeepAwake)
+        Q7HAdditionalReaderSettings()
+        HorizontalDivider()
+        Text("Аудиоплееры аятов",style=MaterialTheme.typography.titleMedium)
+        SettingsSwitch("Отдельный плеер для Дневника хафиза",separateHafiz,setSeparateHafiz)
+        Text(if(separateHafiz) "Тафсир и Дневник хафиза сохраняют своё воспроизведение отдельно."
+             else "Тафсир и Дневник хафиза используют общий плеер.",
+             style=MaterialTheme.typography.bodySmall)
         HorizontalDivider()
         Text("Шаг перемотки аудио", style = MaterialTheme.typography.titleMedium)
         var intervalSeconds by remember { mutableIntStateOf(prefs.hadrSeekIntervalSeconds) }

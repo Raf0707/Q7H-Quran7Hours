@@ -1,0 +1,64 @@
+{
+  "model": "Q7M1",
+  "format_version": 1,
+  "compression": "zlib_per_page_level9",
+  "model_kind": "fixed_mushaf_geometry_lookup_not_neural_network",
+  "page_count": 604,
+  "native_image_size": [
+    960,
+    2133
+  ],
+  "source_image_variant": "Quran_Classic_Light",
+  "marker_centers": "rounded_source_pixels_up_to_0.5px",
+  "verse_boxes": "lossless_integer_source_pixels_from_stage8",
+  "word_boxes": "lossless_integer_candidates_from_stage7",
+  "word_confidence_labels": {
+    "0": "unresolved",
+    "1": "estimated",
+    "2": "gap_aligned_provisional"
+  },
+  "trust_rules": {
+    "word_for_automatic_highlighting": false,
+    "verified_iou": false,
+    "other_themes_calibrated": true,
+    "original_byte_sha256_required": true,
+    "registration_validated_against_four_original_packs": true,
+    "user_annotations_are_independent": true
+  },
+  "annotation_policy": "runtime geometry is read from immutable original image annotations are not an input",
+  "counts": {
+    "verses": 6236,
+    "words": 77429,
+    "segments": 13273,
+    "markers": 6236
+  },
+  "word_confidence_counts": {
+    "0": 115,
+    "1": 40720,
+    "2": 36594
+  },
+  "verse_flags_counts": {
+    "4": 6236
+  },
+  "file": "model.q7m",
+  "binary_bytes": 894642,
+  "binary_sha256": "974d11174f9d360e8ea0f1ba4e220b34f7bba362208aae28e4cda6cfc25c170d",
+  "stage9_ready": true,
+  "android_selection_integrated": true,
+  "stage11_four_variants_ready": true,
+  "pixel_registration_method": "per-page corrected phase correlation",
+  "image_variants": [
+    "Quran_Classic_Light",
+    "Quran_Classic_Dart",
+    "Quran_Tajweed_Light",
+    "Quran_Tajweed_Dark"
+  ],
+  "source_fingerprint_file": "source_sha256_four_variants.q7s",
+  "offsets_file": "calibration_four_variants.q7a",
+  "image_source_check": "sha256 exact WebP bytes + CRC32 offline index",
+  "registration_precision": "1/32 original pixel offset, subpixel estimated automatically",
+  "runtime_selection_integrated": true,
+  "other_themes_calibrated": true,
+  "independent_of_user_ink": true,
+  "runtime_check": "all 4 themes: exact raw WebP SHA256 and calibrated per-page offsets; otherwise fallback v7"
+}

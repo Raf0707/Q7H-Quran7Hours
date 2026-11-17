@@ -329,7 +329,7 @@ internal fun Q7HAdjustableOriginalQpcText(
                 setLineSpacing(0f, 1f)
                 breakStrategy = android.text.Layout.BREAK_STRATEGY_SIMPLE
                 hyphenationFrequency = android.text.Layout.HYPHENATION_FREQUENCY_NONE
-                setTextIsSelectable(false)
+                setTextIsSelectable(true)
                 setPadding(0, 0, 0, 0)
             }
         },
@@ -435,6 +435,7 @@ internal fun Q7HAdjustableUnicodeArabicText(
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
         factory = { ctx ->
             TextView(ctx).apply {
+                setTextIsSelectable(true)
                 layoutDirection = View.LAYOUT_DIRECTION_RTL
                 textDirection = View.TEXT_DIRECTION_RTL
                 gravity = Gravity.RIGHT

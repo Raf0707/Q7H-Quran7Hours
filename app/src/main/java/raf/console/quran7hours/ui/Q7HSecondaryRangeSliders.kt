@@ -20,6 +20,8 @@ import raf.console.quran7hours.data.QuranCatalog
 import raf.console.quran7hours.data.QuranNavigationIndex
 import raf.console.quran7hours.data.TimingCatalog
 import raf.console.quran7hours.media.Q7HRangeState
+import raf.console.quran7hours.media.AudioChannel
+import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 private fun smallerUnits(parent:QuranCatalog.Segment):List<QuranCatalog.Segment> = when(parent){
@@ -57,7 +59,10 @@ internal fun Q7HHadrSecondaryRangeSlider(
     if(ticks.isEmpty()) return
     val current=ticks.indexOfLast { (it.positionMs ?: Long.MAX_VALUE)<=playback.positionMs }.coerceAtLeast(0)
     var drag by remember(unit,range.segment,range.from,range.to){mutableStateOf<Int?>(null)}
-    val index=drag ?: current
+    var pending by remember(unit,range.segment,range.from,range.to){mutableStateOf<Int?>(null)}
+    LaunchedEffect(current,pending) { if(pending==current) pending=null }
+    LaunchedEffect(pending) { if(pending!=null) { delay(3500L);pending=null } }
+    val index=drag ?: pending ?: current
     Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(2.dp)){
         Text("Отрезок ${range.from}–${range.to} · быстрый переход",style=MaterialTheme.typography.labelSmall)
         if (types.size>1) {
@@ -77,7 +82,7 @@ internal fun Q7HHadrSecondaryRangeSlider(
                 Slider(value=index.toFloat(),
                     onValueChange={drag=it.roundToInt().coerceIn(0,ticks.lastIndex)},
                     onValueChangeFinished={
-                        drag?.let { controller?.seekTo(ticks[it].positionMs ?: 0L) }
+                        drag?.let { pending=it; controller?.seekTo(ticks[it].positionMs ?: 0L) }
                         drag=null
                     },valueRange=0f..ticks.lastIndex.coerceAtLeast(1).toFloat(),
                     steps=(ticks.size-2).coerceAtLeast(0),
@@ -99,12 +104,14 @@ internal fun Q7HHadrSecondaryRangeSlider(
  * altering the range endpoints or restarting PERSON/N from the first reciter.
  */
 @Composable
-internal fun Q7HAyahSecondaryRangeSlider(playback:PlaybackSnapshot) {
+internal fun Q7HAyahSecondaryRangeSlider(
+    playback:PlaybackSnapshot, channel:AudioChannel = AudioChannel.AYAH
+) {
     val context=LocalContext.current
     val directions = remember(context.applicationContext) { Q7HSliderDirections.get(context.applicationContext) }
     val rtl = directions.rtl(Q7HSliderKeys.AYAH_RANGE)
     val direction = if (rtl) LayoutDirection.Rtl else LayoutDirection.Ltr
-    val range=Q7HRangeState.ayahRange(context) ?: return
+    val range=Q7HRangeState.ayahRange(context,channel) ?: return
     if (!playback.mediaId.startsWith("ayah:")) return
     val first=QuranNavigationIndex.absolute(QuranNavigationIndex.Ref(range.fromSurah,range.fromAyah))
     val last=QuranNavigationIndex.absolute(QuranNavigationIndex.Ref(range.toSurah,range.toAyah))
@@ -116,11 +123,17 @@ internal fun Q7HAyahSecondaryRangeSlider(playback:PlaybackSnapshot) {
             QuranNavigationIndex.absolute(QuranNavigationIndex.Ref(surah,ayah))
         }
     } ?: first
-    var drag by remember(first,last){ mutableStateOf<Int?>(null) }
-    val index=drag ?: (verse-first).coerceIn(0,total-1)
+    var drag by remember(first,last,channel){ mutableStateOf<Int?>(null) }
+    var pending by remember(first,last,channel){ mutableStateOf<Int?>(null) }
+    val reported=(verse-first).coerceIn(0,total-1)
+    LaunchedEffect(reported,pending) { if(pending==reported) pending=null }
+    LaunchedEffect(pending) { if(pending!=null) { delay(3500L); pending=null } }
+    val index=drag ?: pending ?: reported
     fun choose(n:Int) {
         val position=QuranNavigationIndex.ref(first+n.coerceIn(0,total-1))
-        Q7HRangeState.requestAyahSeek(context,position.surah,position.ayah)
+        if(Q7HRangeState.requestAyahSeek(context,position.surah,position.ayah,channel)) {
+            pending=n.coerceIn(0,total-1)
+        }
     }
     Column(Modifier.fillMaxWidth().padding(horizontal=8.dp)){
         Text("Отрезок аятов · быстрое переключение",style=MaterialTheme.typography.labelSmall)

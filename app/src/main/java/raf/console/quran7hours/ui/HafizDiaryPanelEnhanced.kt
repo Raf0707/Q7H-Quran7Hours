@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -35,6 +36,9 @@ import raf.console.quran7hours.media.Reciter
 /** Same atomic font preparation as Tafsir; independent diary display settings. */
 @Composable
 internal fun HafizDiaryPanelEnhanced(
+    bottomNavEnabled: Boolean,
+    rangeRequest: Int,
+    onRangeRequestConsumed: () -> Unit,
     page: Int,
     tafsir: TafsirStore,
     prefs: UserPreferences,
@@ -51,6 +55,12 @@ internal fun HafizDiaryPanelEnhanced(
     onEndMode: (AyahEndMode) -> Unit,
     onPlayVerse: (Int, Int) -> Unit,
     onNoteAyah: (Int, Int) -> Unit,
+    onQuoteAyah: (Int, Int, String) -> Unit,
+    jumpToAyah: Q7HAyahJump?,
+    onNavigate: () -> Unit,
+    onPanelClose: () -> Unit,
+    onPanelSection: (SheetSection) -> Unit,
+    onPlayRange: (Int, Int, Int, Int, AyahEndMode) -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit
 ) {
@@ -76,6 +86,20 @@ internal fun HafizDiaryPanelEnhanced(
             focus.clearFocus(); keyboard?.hide()
         }.padding(horizontal = 12.dp)
     ) {
+        var showRangeDialog by remember { mutableStateOf(false) }
+        LaunchedEffect(rangeRequest) {
+            if (rangeRequest > 0) { showRangeDialog=true; onRangeRequestConsumed() }
+        }
+        if(showRangeDialog) {
+            val first=ready?.verses?.firstOrNull()
+            Q7HAyahRangeDialog(first?.surah ?: 1,first?.ayah ?: 1,
+                onDismiss={showRangeDialog=false},onStart={s,a,es,ea,mode->
+                    showRangeDialog=false;onPlayRange(s,a,es,ea,mode)
+                })
+        }
+        if (!bottomNavEnabled) Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.End) {
+            TextButton(onClick={showRangeDialog=true}) { Text("Отрезок аятов") }
+        }
         val prepared = ready
         if (prepared == null) {
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
@@ -90,6 +114,16 @@ internal fun HafizDiaryPanelEnhanced(
             val listState = remember(page) {
                 val (index, offset) = prefs.panelViewport("hafiz_$page")
                 LazyListState(index.coerceIn(0, verses.lastIndex), offset)
+            }
+            LaunchedEffect(jumpToAyah?.revision,page,verses) {
+                val jump=jumpToAyah
+                if(jump!=null && jump.section==SheetSection.HAFIZ) {
+                    val index=verses.indexOfFirst { it.surah==jump.surah && it.ayah==jump.ayah }
+                    if(index>=0) {
+                        listState.scrollToItem(index,0)
+                        Q7HAyahJumpBus.finish(jump)
+                    }
+                }
             }
             LaunchedEffect(listState, page) {
                 snapshotFlow {
@@ -141,7 +175,7 @@ internal fun HafizDiaryPanelEnhanced(
                                         showArabic = true, showDictionary = display.showDictionary,
                                         showTranslation = true, showTafsir = display.showTafsir,
                                         order = display.blockOrder
-                                    ), onNote = onNoteAyah
+                                    ), onNote = onNoteAyah, database = db
                                 )
                             }
                             if (qpc != null) {
@@ -199,12 +233,14 @@ internal fun HafizDiaryPanelEnhanced(
                                     )
                                 }
                             }
+                            if (verse.explanation.isNotBlank()) {
+                                Q7HQuoteAction(verse.surah,verse.ayah,verse.explanation,onQuoteAyah)
+                            }
                         }
                     }
                 }
             }
         }
-        Q7HAyahSecondaryRangeSlider(playback)
         if (display.showAudio) {
             val target = q7hAyahMiniTarget(ready?.verses.orEmpty(), playback)
             if (target != null) {
@@ -213,21 +249,9 @@ internal fun HafizDiaryPanelEnhanced(
                     endMode, onEndMode, onPlayVerse)
             }
         }
+        if (display.showAudio) Q7HRangeBelowPlayer(SheetSection.HAFIZ,playback,controller)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        Row(
-            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(vertical = 2.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onNext, enabled = page < 604) {
-                Icon(Icons.Default.ChevronLeft, contentDescription = "Следующая страница")
-            }
-            Text(page.toString(), modifier = Modifier.widthIn(min = 72.dp),
-                textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.titleLarge)
-            IconButton(onClick = onPrevious, enabled = page > 1) {
-                Icon(Icons.Default.ChevronRight, contentDescription = "Предыдущая страница")
-            }
-        }
+        if (!bottomNavEnabled) Q7HPanelFooter(page,SheetSection.HAFIZ,onPrevious,onNext,onNavigate,
+            onPanelClose,onPanelSection)
     }
 }

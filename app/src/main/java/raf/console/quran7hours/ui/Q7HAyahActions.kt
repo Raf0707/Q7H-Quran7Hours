@@ -23,42 +23,13 @@ import raf.console.quran7hours.data.QuranCatalog
 import raf.console.quran7hours.data.QuranNavigationIndex
 import raf.console.quran7hours.data.QuranNavigationPageSource
 import raf.console.quran7hours.data.Q7HSurahTitles
+import raf.console.quran7hours.data.LearningDatabase
+import androidx.compose.ui.graphics.Color
 
 /** Persistent, independent ayah bookmarks. Existing page bookmarks are not modified. */
 internal object Q7HAyahBookmarks {
-    private const val PREFS = "q7h_ayah_bookmarks_v1"
-    private val state = mutableStateMapOf<String, Boolean>()
-    private var loaded = false
-    private fun key(surah: Int, ayah: Int) = "$surah:$ayah"
-    @Synchronized private fun init(context: Context) {
-        if (loaded) return
-        val values = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getStringSet("keys", emptySet()).orEmpty()
-        for (entry in values) {
-            val parts = entry.split(':')
-            if (parts.size == 2 && parts[0].toIntOrNull()?.let { it in 1..114 } == true &&
-                parts[1].toIntOrNull()?.let { it > 0 } == true) state[entry] = true
-        }
-        loaded = true
-    }
-    fun contains(context: Context, surah: Int, ayah: Int): Boolean {
-        init(context); return state[key(surah,ayah)] == true
-    }
-    fun toggle(context: Context, surah: Int, ayah: Int) {
-        init(context)
-        val k = key(surah,ayah)
-        if (state[k] == true) state.remove(k) else state[k] = true
-        context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putStringSet("keys", state.keys.toSet()).apply()
-    }
-    fun list(context: Context): List<Pair<Int,Int>> {
-        init(context)
-        return state.keys.mapNotNull { item ->
-            val s = item.substringBefore(':').toIntOrNull()
-            val a = item.substringAfter(':').toIntOrNull()
-            if(s != null && a != null) s to a else null
-        }.sortedWith(compareBy({it.first},{it.second}))
-    }
+    fun contains(context: Context,surah:Int,ayah:Int) = Q7HAyahCategoryStore.contains(context,surah,ayah)
+    fun list(context: Context) = Q7HAyahCategoryStore.list(context)
 }
 
 internal enum class Q7HVerseAction(val title: String) {
@@ -122,17 +93,22 @@ private fun Context.q7hShare(text: String) {
 internal fun Q7HAyahActions(
     content: Q7HVerseContent,
     onNote: (Int,Int) -> Unit,
+    database: LearningDatabase,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
+    var bookmarkPopup by remember { mutableStateOf(false) }
     var composition by remember { mutableStateOf<Q7HVerseAction?>(null) }
     var quick by remember { mutableStateOf(Q7HQuickAction.get(context)) }
     val saved = Q7HAyahBookmarks.contains(context,content.surah,content.ayah)
+    val bookmarkTypes = remember(database) { database.types() }
+    val markIds = Q7HAyahCategoryStore.typeIds(context,content.surah,content.ayah)
+    val primaryMark = bookmarkTypes.firstOrNull { it.id in markIds }
     fun execute(action: Q7HVerseAction) {
         expanded = false
         when(action) {
-            Q7HVerseAction.BOOKMARK -> Q7HAyahBookmarks.toggle(context,content.surah,content.ayah)
+            Q7HVerseAction.BOOKMARK -> bookmarkPopup = true
             Q7HVerseAction.NOTE -> onNote(content.surah,content.ayah)
             Q7HVerseAction.COPY -> {
                 val selected=content.orderedIds().filter {it in content.visible()}
@@ -149,12 +125,16 @@ internal fun Q7HAyahActions(
     }
     Row(modifier,verticalAlignment=Alignment.CenterVertically) {
         IconButton(onClick={execute(quick)}) {
-            Icon(when(quick) {
-                Q7HVerseAction.BOOKMARK -> if(saved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder
-                Q7HVerseAction.NOTE -> Icons.Default.NoteAdd
-                Q7HVerseAction.COPY, Q7HVerseAction.COPY_PART -> Icons.Default.ContentCopy
-                else -> Icons.Default.Share
-            },contentDescription=quick.title)
+            if(quick==Q7HVerseAction.BOOKMARK && primaryMark!=null) {
+                LearningBookmarkIcon(primaryMark.icon,Color(primaryMark.color.toInt()))
+            } else {
+                Icon(when(quick) {
+                    Q7HVerseAction.BOOKMARK -> if(saved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder
+                    Q7HVerseAction.NOTE -> Icons.Default.NoteAdd
+                    Q7HVerseAction.COPY, Q7HVerseAction.COPY_PART -> Icons.Default.ContentCopy
+                    else -> Icons.Default.Share
+                },contentDescription=quick.title)
+            }
         }
         Box {
             IconButton(onClick={expanded=true}) { Icon(Icons.Default.MoreVert,"Действия с аятом") }
@@ -165,6 +145,8 @@ internal fun Q7HAyahActions(
             }
         }
     }
+    Q7HAyahCategoryPopup(content.surah,content.ayah,bookmarkPopup,
+        onDismiss={bookmarkPopup=false},database=database)
     if(composition!=null) Q7HVerseComposer(content,composition!!,onClose={composition=null})
 }
 
@@ -241,10 +223,12 @@ internal fun Q7HQuickActionSettings() {
 @Composable
 internal fun Q7HAyahBookmarksDrawer(
     onOpen:(Int,Int)->Unit,
-    onNote:(Int,Int)->Unit
+    onNote:(Int,Int)->Unit,
+    database: LearningDatabase
 ) {
     val context = LocalContext.current
     val entries = Q7HAyahBookmarks.list(context)
+    val types = remember(database) { database.types() }
     val pages = remember(context.applicationContext) {
         QuranNavigationPageSource(context.applicationContext)
     }
@@ -272,8 +256,12 @@ internal fun Q7HAyahBookmarksDrawer(
                                     style=MaterialTheme.typography.labelSmall) }
                             }
                         }
+                        val selectedTypes = Q7HAyahCategoryStore.typeIds(context,surah,ayah)
+                        types.filter { it.id in selectedTypes }.take(3).forEach { mark ->
+                            LearningBookmarkIcon(mark.icon,Color(mark.color.toInt()),Modifier.size(21.dp))
+                        }
                         IconButton(onClick={onNote(surah,ayah)}){Icon(Icons.Default.NoteAdd,"Заметка")}
-                        IconButton(onClick={Q7HAyahBookmarks.toggle(context,surah,ayah)}) {
+                        IconButton(onClick={Q7HAyahCategoryStore.remove(context,surah,ayah)}) {
                             Icon(Icons.Default.DeleteOutline,"Удалить закладку, сохранить заметку")
                         }
                     }

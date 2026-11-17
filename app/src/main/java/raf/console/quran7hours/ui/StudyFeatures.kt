@@ -1,6 +1,13 @@
 package raf.console.quran7hours.ui
 
+import android.annotation.SuppressLint
 import android.graphics.Bitmap
+import android.os.SystemClock
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlin.math.ceil
+import kotlin.math.roundToInt
+import raf.console.quran7hours.data.UserPreferences
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -13,10 +20,17 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -28,12 +42,16 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -61,15 +79,18 @@ import kotlin.math.min
 
 @Composable
 internal fun LearningBookmarkIcon(icon: String, tint: Color, modifier: Modifier = Modifier) {
-    val art = when (icon) {
-        "headphones" -> Icons.Default.Headphones
-        "school" -> Icons.Default.School
-        "menu_book" -> Icons.Default.MenuBook
-        "psychology" -> Icons.Default.Psychology
-        "repeat" -> Icons.Default.Repeat
-        else -> Icons.Default.Bookmark
+    // No circular background. White/black marks get a contour tracing the actual
+    // bookmark shape by drawing the same vector slightly larger behind itself.
+    val luminance = (tint.red * .2126f + tint.green * .7152f + tint.blue * .0722f)
+    val needsOutline = luminance > .88f || luminance < .14f
+    val outline = if (luminance > .88f) Color(0xFF3C3C3C) else Color(0xFFE8E8E8)
+    Box(modifier = modifier.defaultMinSize(minWidth=24.dp,minHeight=24.dp),
+        contentAlignment = Alignment.Center) {
+        val vector = Q7HBookmarkIconCatalog.vector(icon)
+        if (needsOutline) Icon(vector, null, tint = outline,
+            modifier = Modifier.fillMaxSize())
+        Icon(vector, null, tint = tint, modifier = Modifier.fillMaxSize(if (needsOutline) .86f else 1f))
     }
-    Icon(art, contentDescription = null, tint = tint, modifier = modifier)
 }
 
 /** A compact dropdown-style popup positioned at the center of the window, not the toolbar. */
@@ -83,7 +104,10 @@ internal fun LearningBookmarkMenu(
     onToggle: (BookmarkType) -> Unit,
     onEdit: (BookmarkType) -> Unit,
     onCreate: () -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    titleOverride: String? = null,
+    selectedTypeIds: Set<Long>? = null,
+    showDeleteOverride: Boolean? = null
 ) {
     if (!expanded) return
 
@@ -128,13 +152,14 @@ internal fun LearningBookmarkMenu(
             ) {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     Text(
-                        "Закладки · страница $page",
+                        titleOverride ?: "Закладки · страница $page",
                         style = MaterialTheme.typography.titleSmall,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
                     )
                     // The delete action remains first, before the color choices.
                     // Do not show it when the current page has no bookmarks.
-                    if (bookmarks.any { it.page == page }) {
+                    if (showDeleteOverride ?: (selectedTypeIds?.isNotEmpty() == true ||
+                        (selectedTypeIds == null && bookmarks.any { it.page == page }))) {
                         DropdownMenuItem(
                             text = { Text("Удалить закладку") },
                             leadingIcon = { Icon(Icons.Default.DeleteOutline, contentDescription = null) },
@@ -142,16 +167,20 @@ internal fun LearningBookmarkMenu(
                         )
                         HorizontalDivider()
                     }
-                    types.forEachIndexed { index, type ->
-                        if (index == 8) {
-                            HorizontalDivider()
+                    // Sort by kind rather than relying on the old magic index 8.
+                    val orderedTypes = types.sortedWith(compareBy<BookmarkType> {
+                        if (it.icon == "bookmark") 0 else 1
+                    }.thenBy { it.id })
+                    orderedTypes.forEachIndexed { index, type ->
+                        if (index == 0 || orderedTypes[index - 1].icon == "bookmark" && type.icon != "bookmark") {
+                            if (index > 0) HorizontalDivider()
                             Text(
-                                "Назначения",
+                                if (type.icon == "bookmark") "Цветные закладки" else "Функциональные закладки",
                                 style = MaterialTheme.typography.labelLarge,
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                             )
                         }
-                        val selected = bookmarks.any { it.page == page && it.typeId == type.id }
+                        val selected = selectedTypeIds?.contains(type.id) ?: bookmarks.any { it.page == page && it.typeId == type.id }
                         Row(
                             modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -206,7 +235,7 @@ internal fun LearningBookmarkMenu(
                     }
                     HorizontalDivider()
                     DropdownMenuItem(
-                        text = { Text("Свой цвет и закладка") },
+                        text = { Text("Своя закладка") },
                         leadingIcon = { Icon(Icons.Default.AddCircleOutline, contentDescription = null) },
                         onClick = onCreate
                     )
@@ -216,48 +245,144 @@ internal fun LearningBookmarkMenu(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun Q7HBookmarkModeTabs(functional:Boolean,onChange:(Boolean)->Unit) {
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        SegmentedButton(selected=!functional,onClick={onChange(false)},
+            shape=SegmentedButtonDefaults.itemShape(0,2),icon={}) { Text("Цветная") }
+        SegmentedButton(selected=functional,onClick={onChange(true)},
+            shape=SegmentedButtonDefaults.itemShape(1,2),icon={}) { Text("Функц.") }
+    }
+}
+
+/** Identical editor for Mushaf page bookmarks and ayah bookmarks. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun BookmarkTypeEditor(
     initial: BookmarkType?,
     onDismiss: () -> Unit,
-    onSave: (String, String, Long) -> Unit,
+    onSave: (String, String, Long, String) -> Unit,
     onDelete: (() -> Unit)? = null
 ) {
     var name by remember(initial?.id) { mutableStateOf(initial?.name ?: "") }
     var purpose by remember(initial?.id) { mutableStateOf(initial?.purpose ?: "") }
+    var functional by remember(initial?.id) { mutableStateOf(initial?.icon?.let { it != "bookmark" } ?: false) }
+    var selectedIcon by remember(initial?.id) {
+        mutableStateOf(initial?.icon?.takeIf { it != "bookmark" } ?: "star")
+    }
+    var search by remember(initial?.id) { mutableStateOf("") }
     val raw = initial?.color ?: 0xFF467FDEL
     var r by remember(initial?.id) { mutableFloatStateOf(((raw shr 16) and 255).toFloat()) }
     var g by remember(initial?.id) { mutableFloatStateOf(((raw shr 8) and 255).toFloat()) }
     var b by remember(initial?.id) { mutableFloatStateOf((raw and 255).toFloat()) }
     val color = 0xFF000000L or (r.toLong() shl 16) or (g.toLong() shl 8) or b.toLong()
-    AlertDialog(onDismissRequest = onDismiss, title = {
-        Text(if (initial == null) "Новая закладка" else "Назначение закладки")
-    }, text = {
-        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedTextField(value = name, onValueChange = { name = it.take(60) },
-                label = { Text("Название") }, singleLine = true)
-            OutlinedTextField(value = purpose, onValueChange = { purpose = it.take(280) },
-                label = { Text("Для чего использую") }, minLines = 2, maxLines = 4,
-                placeholder = { Text("Например, ежедневный вирд") })
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(40.dp).background(Color(color.toInt()), CircleShape))
-                Spacer(Modifier.width(12.dp))
-                Text("#%06X".format(color and 0xFFFFFFL))
-            }
-            listOf(Triple("Красный", r, 0), Triple("Зелёный", g, 1), Triple("Синий", b, 2))
-                .forEach { (label, value, channel) ->
-                    Text(label, style = MaterialTheme.typography.labelSmall)
-                    Slider(value = value, onValueChange = {
-                        when (channel) { 0 -> r = it; 1 -> g = it; else -> b = it }
-                    }, valueRange = 0f..255f)
+    val resultIcons = remember(search) { Q7HBookmarkIconCatalog.find(search) }
+    val ctx=androidx.compose.ui.platform.LocalContext.current
+    Q7HBottomNavSettings.load(ctx)
+    val tabsAtBottom=Q7HBottomNavSettings.enabled
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (initial == null) "Своя закладка" else "Редактировать закладку") },
+        text = {
+            Column(modifier=Modifier.fillMaxWidth().heightIn(max=535.dp)) {
+                if (!tabsAtBottom) Q7HBookmarkModeTabs(functional) { functional=it }
+                Column(Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                    verticalArrangement=Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = name, onValueChange = { name = it.take(60) },
+                    label = { Text("Название") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = purpose, onValueChange = { purpose = it.take(280) },
+                    label = { Text(if (functional) "Функция закладки" else "Для чего использую") },
+                    minLines = 2, maxLines = 4, modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Например: аяты для повторения и размышления") }
+                )
+                if (!functional) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(40.dp).background(Color(color.toInt()), CircleShape)
+                            .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape))
+                        Spacer(Modifier.width(12.dp))
+                        Text("#%06X".format(color and 0xFFFFFFL))
+                    }
+                    listOf(Triple("Красный", r, 0), Triple("Зелёный", g, 1), Triple("Синий", b, 2))
+                        .forEach { (title, value, channel) ->
+                            Text(title, style = MaterialTheme.typography.labelSmall)
+                            Slider(value = value, onValueChange = {
+                                when (channel) { 0 -> r = it; 1 -> g = it; else -> b = it }
+                            }, valueRange = 0f..255f)
+                        }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        LearningBookmarkIcon(selectedIcon, Color(color.toInt()), Modifier.size(42.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Text("Иконка: ${Q7HBookmarkIconCatalog.name(selectedIcon)}",
+                            style = MaterialTheme.typography.bodyMedium)
+                    }
+                    OutlinedTextField(
+                        value = search, onValueChange = { search = it.take(70) },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        label = { Text("Поиск иконки (название, категория)") },
+                        singleLine = true, modifier = Modifier.fillMaxWidth()
+                    )
+                    Text("Найдено: ${resultIcons.size} из ${Q7HBookmarkIconCatalog.items.size}",
+                        style = MaterialTheme.typography.labelSmall)
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 76.dp),
+                        modifier = Modifier.fillMaxWidth().height(248.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        gridItems(resultIcons, key = { it.key }) { item ->
+                            val active = selectedIcon == item.key
+                            Surface(
+                                onClick = { selectedIcon = item.key },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (active) MaterialTheme.colorScheme.primaryContainer
+                                    else MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, if (active) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.height(80.dp)
+                            ) {
+                                Column(
+                                    Modifier.fillMaxSize().padding(4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(item.vector, contentDescription = item.label,
+                                        tint = if (active) MaterialTheme.colorScheme.onPrimaryContainer
+                                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(27.dp))
+                                    Text(item.label, maxLines = 2, fontSize = 10.sp,
+                                        textAlign = TextAlign.Center,
+                                        lineHeight = 11.sp)
+                                }
+                            }
+                        }
+                    }
+                    Text("Выберите значок. Он появится в списке закладок и рядом с аятом.",
+                        style = MaterialTheme.typography.labelSmall)
                 }
-            if (onDelete != null) TextButton(onClick = onDelete) { Text("Удалить свою категорию") }
-        }
-    }, confirmButton = {
-        TextButton(onClick = { onSave(name, purpose, color) }, enabled = name.isNotBlank()) {
-            Text("Сохранить")
-        }
-    }, dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } })
+                if (onDelete != null) TextButton(onClick = onDelete) {
+                    Text("Удалить свою категорию")
+                }
+                }
+                if (tabsAtBottom) {
+                    HorizontalDivider()
+                    Q7HBookmarkModeTabs(functional) { functional=it }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(name.trim(), purpose.trim(), color, if (functional) selectedIcon else "bookmark") },
+                enabled = name.isNotBlank() && (!functional || (purpose.isNotBlank() && selectedIcon.isNotBlank()))
+            ) { Text("Сохранить") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
+    )
 }
 
 @Composable
@@ -531,7 +656,26 @@ private fun HafizVerseCard(
     }
 }
 
+/**
+ * White marker on a white page and black marker on a black page would vanish.
+ * Only MARKER tools receive a display-time contrast correction. The original
+ * ARGB is kept in Room/backup, so swapping theme is reversible and pencils,
+ * eraser, text, outline tools and user-defined colors are never altered.
+ */
+internal fun q7hMarkerVisibleArgb(argb: Long, tool: String, darkPage: Boolean): Long {
+    val marker = tool == "marker" || tool == "marker_ruler" ||
+        tool == "marker_single" || tool == "marker_ruler_single" || tool == "smart_marker"
+    if (!marker) return argb
+    val alpha = argb and 0xFF000000L
+    return when {
+        !darkPage && (argb and 0xFFFFFFL) == 0xFFFFFFL -> alpha or 0x202020L
+        darkPage && (argb and 0xFFFFFFL) in setOf(0x202020L, 0x000000L) -> alpha or 0xFFFFFFL
+        else -> argb
+    }
+}
+
 /** Brush strokes remain in image-relative coordinates, never baked into Qur'an WebP. */
+@SuppressLint("UnusedBoxWithConstraintsScope")
 @Composable
 internal fun InkPageLayer(
     bitmap: Bitmap,
@@ -540,8 +684,13 @@ internal fun InkPageLayer(
     inkColor: Long,
     width: Float,
     onChanged: () -> Unit,
+    onDraft: (InkStroke?) -> Unit,
+    onSmartTap: (InkPoint) -> Unit,
+    onSmartClear: (InkPoint) -> Unit,
+    smartPrefs: UserPreferences,
     editable: Boolean,
     coverColor: Color,
+    darkPage: Boolean,
     modifier: Modifier = Modifier
 ) {
     val active = remember(strokes) { mutableStateListOf<InkPoint>() }
@@ -549,6 +698,20 @@ internal fun InkPageLayer(
     var textPosition by remember(strokes) { mutableStateOf<InkPoint?>(null) }
     var textEntry by remember(strokes) { mutableStateOf("") }
     val current = rememberUpdatedState(onChanged)
+    val draftCallback=rememberUpdatedState(onDraft)
+    val smartCallback=rememberUpdatedState(onSmartTap)
+    val clearCallback=rememberUpdatedState(onSmartClear)
+    val gestureScope = rememberCoroutineScope()
+    val smartRevision = smartPrefs.inkSmartSettingsRevision
+    val markGesture = smartPrefs.inkSmartMarkGesture
+    val clearGesture = smartPrefs.inkSmartClearGesture
+    val holdSeconds = smartPrefs.inkSmartHoldSeconds
+    val countdownSide = smartPrefs.inkSmartCountdownSide
+    val markerRadius = smartPrefs.inkSmartRadius
+    val markerBorder = smartPrefs.inkSmartBorderEnabled
+    val markerBorderWidth = smartPrefs.inkSmartBorderWidth
+    data class Countdown(val x: Float, val y: Float, val remaining: Float, val total: Int)
+    var countdown by remember { mutableStateOf<Countdown?>(null) }
     val drawInput = if (editable) Modifier.pointerInput(bitmap, strokes, tool, inkColor, width) {
         fun point(offset: Offset): InkPoint? {
             val fit = min(size.width / bitmap.width.toFloat(), size.height / bitmap.height.toFloat())
@@ -560,19 +723,17 @@ internal fun InkPageLayer(
         }
         fun erase(point: InkPoint) {
             val candidate = strokes.indexOfLast { stroke ->
-                stroke.points.any { p ->
-                    hypot((p.x - point.x).toDouble(), (p.y - point.y).toDouble()) <
-                        (stroke.width.coerceAtLeast(.012f) * 1.3f).toDouble()
-                }
+                q7hInkEraseHit(stroke, point, bitmap.width.toFloat() / bitmap.height, tap = false)
             }
             if (candidate >= 0) { strokes.removeAt(candidate); current.value() }
         }
         detectDragGestures(
             onDragStart = { offset ->
+                draftCallback.value(null)
                 active.clear()
                 point(offset)?.let { p ->
                     if (tool == "eraser") erase(p)
-                    else if (tool != "text") active.add(p)
+                    else if (tool != "text" && tool != "smart_marker") active.add(p)
                 }
                 inProgress = true
             },
@@ -580,58 +741,133 @@ internal fun InkPageLayer(
                 change.consume()
                 point(change.position)?.let { p ->
                     if (tool == "eraser") erase(p)
-                    else if (inProgress && tool != "text") active.add(p)
+                    else if (inProgress && tool != "text" && tool != "smart_marker") {
+                        // Straightedge markers/pencils stay on a horizontal line even
+                        // if the finger drifts vertically; saved stroke is deterministic.
+                        val horizontal = tool == "marker_ruler" ||
+                            tool == "marker_ruler_single" || tool == "pen_ruler"
+                        active.add(if(horizontal && active.isNotEmpty()) p.copy(y = active.first().y) else p)
+                        if (active.isNotEmpty()) draftCallback.value(InkStroke(tool,inkColor,width,active.toList()))
+                    }
                 }
             },
-            onDragCancel = { active.clear(); inProgress = false },
+            onDragCancel = { active.clear(); inProgress = false;draftCallback.value(null) },
             onDragEnd = {
-                if (tool != "eraser" && tool != "text" && active.isNotEmpty()) {
+                if (tool != "eraser" && tool != "text" && tool != "smart_marker" && active.isNotEmpty()) {
                     strokes.add(InkStroke(tool, inkColor, width, active.toList()))
                     current.value()
                 }
-                active.clear(); inProgress = false
+                active.clear(); inProgress = false;draftCallback.value(null)
             }
         )
     } else Modifier
-    val tapInput = if (editable) Modifier.pointerInput(bitmap, strokes, tool, inkColor, width) {
-        detectTapGestures { offset ->
+    val tapInput = if (editable) Modifier.pointerInput(
+        bitmap, strokes, tool, inkColor, width, markGesture, clearGesture, holdSeconds
+    ) {
+        var timedAction: Job? = null
+        fun imagePoint(offset: Offset): InkPoint? {
             val fit = min(size.width / bitmap.width.toFloat(), size.height / bitmap.height.toFloat())
             val w = bitmap.width * fit; val h = bitmap.height * fit
-            val left = (size.width - w) / 2f; val top = (size.height - h) / 2f
-            if (offset.x in left..(left+w) && offset.y in top..(top+h)) {
-                val point = InkPoint((offset.x-left)/w, (offset.y-top)/h)
-                if (tool == "text") {
-                    textEntry = ""
-                    textPosition = point
-                } else if (tool == "eraser") {
-                    val target = strokes.indexOfLast { item -> item.points.any { p ->
-                        hypot((p.x-point.x).toDouble(), (p.y-point.y).toDouble()) <
-                            (item.width.coerceAtLeast(.02f)*1.4f).toDouble()
-                    } }
-                    if (target >= 0) { strokes.removeAt(target); current.value() }
-                } else {
-                    strokes.add(InkStroke(tool, inkColor, width, listOf(point)))
+            val l = (size.width - w) / 2f; val t = (size.height - h) / 2f
+            if (offset.x !in l..(l+w) || offset.y !in t..(t+h)) return null
+            return InkPoint(((offset.x-l)/w).coerceIn(0f,1f),((offset.y-t)/h).coerceIn(0f,1f))
+        }
+        fun perform(action:String, offset:Offset) {
+            val point=imagePoint(offset) ?: return
+            when {
+                tool == "smart_marker" && action==markGesture -> smartCallback.value(point)
+                tool == "smart_marker" && action==clearGesture -> clearCallback.value(point)
+                tool == "text" && action=="single" -> {
+                    textEntry="";textPosition=point
+                }
+                tool == "eraser" && action=="single" -> {
+                    val index=strokes.indexOfLast { item ->
+                        q7hInkEraseHit(item,point,bitmap.width.toFloat()/bitmap.height,true)
+                    }
+                    if(index>=0) { strokes.removeAt(index); current.value() }
+                }
+                tool != "smart_marker" && tool != "eraser" && tool != "text" && action=="single" -> {
+                    strokes.add(InkStroke(tool,inkColor,width,listOf(point)))
                     current.value()
                 }
             }
         }
+        detectTapGestures(
+            onPress = {
+                try { tryAwaitRelease() } finally {
+                    // Release, cancellation or leaving drawing mode all cancel.
+                    timedAction?.cancel()
+                    timedAction=null
+                    countdown=null
+                }
+            },
+            onTap = { offset -> perform("single",offset) },
+            onDoubleTap = if(tool=="smart_marker" &&
+                (markGesture=="double" || clearGesture=="double")) {
+                { offset: Offset -> perform("double",offset) }
+            } else null,
+            onLongPress = { offset ->
+                if(tool=="smart_marker") {
+                    if(markGesture=="long" || clearGesture=="long") {
+                        perform("long",offset)
+                    } else if(markGesture=="timed" || clearGesture=="timed") {
+                        val target=imagePoint(offset)
+                        if(target!=null) {
+                            timedAction?.cancel()
+                            timedAction=gestureScope.launch {
+                                val started=SystemClock.uptimeMillis()
+                                val duration=holdSeconds*1000L
+                                try {
+                                    while(true) {
+                                        val elapsed=SystemClock.uptimeMillis()-started
+                                        val remaining=(1f-elapsed.toFloat()/duration).coerceIn(0f,1f)
+                                        countdown=Countdown(offset.x,offset.y,remaining,holdSeconds)
+                                        if(elapsed>=duration) break
+                                        delay(40L)
+                                    }
+                                    perform("timed",offset)
+                                } finally { countdown=null }
+                            }
+                        }
+                    }
+                }
+            }
+        )
     } else Modifier
     BoxWithConstraints(modifier.fillMaxSize()) {
     Canvas(Modifier.fillMaxSize().then(drawInput).then(tapInput)) {
         val fit = min(size.width / bitmap.width, size.height / bitmap.height)
         val w = bitmap.width * fit; val h = bitmap.height * fit
         val left = (size.width - w) / 2f; val top = (size.height - h) / 2f
-        fun render(stroke: InkStroke) {
+        fun render(stroke: InkStroke, opaqueOneLayer: Boolean = false) {
             val pts = stroke.points
             if (pts.isEmpty() || stroke.tool == "text") return
-            val col = (if (stroke.tool == "cover") coverColor else Color(stroke.color.toInt())).copy(alpha = when (stroke.tool) {
-                "marker" -> .32f
+            val col = (if (stroke.tool == "cover") coverColor
+                else Color(q7hMarkerVisibleArgb(stroke.color, stroke.tool, darkPage).toInt())
+                ).copy(alpha = when (stroke.tool) {
+                "marker", "marker_ruler" -> .32f
+                // Within the offscreen mask always draw opaque: transparency is
+                // applied ONCE when the combined mask is composited into the page.
+                "marker_single", "marker_ruler_single", "smart_marker" -> if (opaqueOneLayer) 1f else .32f
                 // A memorization cover must NEVER reveal the underlying ayah.
                 "cover" -> 1f
                 else -> 1f
             })
             val sw = (stroke.width * w).coerceAtLeast(2f)
-            if (stroke.tool == "box" && pts.size >= 2) {
+            if (stroke.tool == "smart_marker" && pts.size >= 2) {
+                // The actual image-derived glyph/harakat band defines the height.
+                // A round-rect has fully rounded corners but does NOT extend
+                // horizontally outside the measured ayah span (unlike round caps).
+                val a = pts.first(); val b = pts.last()
+                val x0 = left + minOf(a.x, b.x) * w
+                val x1 = left + maxOf(a.x, b.x) * w
+                val y0 = top + a.y * h - sw / 2f
+                if (x1 > x0) {
+                    val radius = minOf(sw / 2f, (x1-x0)/2f) * markerRadius
+                    drawRoundRect(col, topLeft=Offset(x0,y0),size=Size(x1-x0,sw),
+                        cornerRadius=CornerRadius(radius))
+                }
+            } else if (stroke.tool == "box" && pts.size >= 2) {
                 val a = pts.first(); val b = pts.last()
                 drawRect(col, topLeft = Offset(left + minOf(a.x,b.x)*w, top + minOf(a.y,b.y)*h),
                     size = Size(kotlin.math.abs(a.x-b.x)*w, kotlin.math.abs(a.y-b.y)*h),
@@ -643,11 +879,79 @@ internal fun InkPageLayer(
                     moveTo(left+pts[0].x*w, top+pts[0].y*h)
                     pts.drop(1).forEach { lineTo(left+it.x*w, top+it.y*h) }
                 }
-                drawPath(path, col, style = Stroke(sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                drawPath(path, col, style = Stroke(sw,
+                    cap = StrokeCap.Round, join = StrokeJoin.Round))
             }
         }
-        strokes.forEach(::render)
-        if (inProgress && active.isNotEmpty()) render(InkStroke(tool, inkColor, width, active.toList()))
+        val draftStroke = if (inProgress && active.isNotEmpty())
+            InkStroke(tool, inkColor, width, active.toList()) else null
+        val onPage = strokes.toList() + listOfNotNull(draftStroke)
+        // A single-layer marker means ONE alpha mask per ARGB color across all
+        // strokes using either one-layer variant. Touching/overlapping strokes
+        // remain equally translucent; they cannot darken each other.
+        val oneLayerIds = setOf("marker_single", "marker_ruler_single", "smart_marker")
+        // Draw translucent markers underneath handwriting/pen/cover strokes.
+        // This preserves the readability of existing user annotations without
+        // changing any persisted data, alpha or marker geometry.
+        onPage.filter { it.tool in oneLayerIds }
+            .groupBy { it.color }.forEach { (_, sameColor) ->
+                val layerPaint = Paint().apply { alpha = .32f }
+                drawContext.canvas.saveLayer(
+                    Rect(left, top, left + w, top + h), layerPaint)
+                try {
+                    sameColor.forEach { render(it, opaqueOneLayer = true) }
+                } finally {
+                    drawContext.canvas.restore()
+                }
+            }
+        // The optional border is painted over the shared translucent mask so
+        // its appearance is stable even if adjacent verses touch.
+        if (markerBorder) onPage.filter { it.tool=="smart_marker" && it.points.size>=2 }
+            .forEach { ink ->
+                val a=ink.points.first(); val b=ink.points.last()
+                val x0=left+minOf(a.x,b.x)*w; val x1=left+maxOf(a.x,b.x)*w
+                val hInk=(ink.width*w).coerceAtLeast(2f)
+                val y0=top+a.y*h-hInk/2f
+                val r=minOf(hInk/2f,(x1-x0)/2f)*markerRadius
+                val borderThickness=markerBorderWidth.dp.toPx().coerceAtMost(hInk*.25f)
+                val inset=borderThickness/2f
+                if(x1-x0>borderThickness*2f && hInk>borderThickness*2f) drawRoundRect(
+                    color=Color(q7hMarkerVisibleArgb(ink.color,ink.tool,darkPage).toInt()).copy(alpha=.88f),
+                    topLeft=Offset(x0+inset,y0+inset),
+                    size=Size(x1-x0-2f*inset,hInk-2f*inset),
+                    cornerRadius=CornerRadius((r-inset).coerceAtLeast(0f)),
+                    style=Stroke(width=borderThickness)
+                )
+            }
+        onPage.filterNot { it.tool in oneLayerIds }.forEach { render(it) }
+    }
+    // Circular countdown is drawn in SCREEN coordinates while the user holds
+    // a finger, but the action is always resolved in image coordinates.
+    countdown?.let { c ->
+        val d = LocalDensity.current
+        val ring = with(d) { 54.dp.toPx() }
+        val pad = with(d) { 10.dp.toPx() }
+        val hostW = with(d) { maxWidth.toPx() }
+        val hostH = with(d) { maxHeight.toPx() }
+        val desiredX = when(countdownSide) {
+            "right" -> c.x + 18f
+            "top" -> c.x - ring/2f
+            else -> c.x - ring - 18f
+        }
+        val nearLeft = desiredX < pad
+        val x = if(nearLeft) c.x-ring/2f else desiredX
+        val desiredY = if(nearLeft || countdownSide=="top") {
+            if(c.y-ring-pad<pad) c.y+18f else c.y-ring-18f
+        } else c.y-ring/2f
+        val xSafe=x.coerceIn(pad,(hostW-ring-pad).coerceAtLeast(pad))
+        val ySafe=desiredY.coerceIn(pad,(hostH-ring-pad).coerceAtLeast(pad))
+        Box(Modifier.offset { IntOffset(xSafe.roundToInt(),ySafe.roundToInt()) }
+            .size(54.dp).background(MaterialTheme.colorScheme.surface.copy(alpha=.95f),CircleShape),
+            contentAlignment=Alignment.Center) {
+            CircularProgressIndicator(progress={c.remaining}, modifier=Modifier.fillMaxSize().padding(5.dp))
+            Text(ceil(c.remaining*c.total).toInt().coerceAtLeast(0).toString(),
+                color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
+        }
     }
     // Text uses Compose layout instead of bitmap painting so Arabic shaping remains correct.
     val fitDp = min(maxWidth.value / bitmap.width, maxHeight.value / bitmap.height)
@@ -681,72 +985,292 @@ internal fun InkPageLayer(
     }
 }
 
+/** A small overlay distinguishes the straightedge tool from a freehand marker. */
+@Composable
+private fun Q7HInkToolIcon(id: String, description: String, tint: Color) {
+    // Keep the layer badge INSIDE the 42dp tool bounds. Never offset it outside
+    // the parent: the old 30dp box clipped badges on narrow devices.
+    Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+        val icon = when(id) {
+            "marker","marker_ruler","marker_single","marker_ruler_single","smart_marker" -> Icons.Default.FormatPaint
+            "pen_ruler","pen" -> Icons.Default.Edit
+            "cover" -> Icons.Default.BlurOn
+            "text" -> Icons.Default.TextFields
+            "box" -> Icons.Default.CropSquare
+            "eraser" -> Icons.Default.AutoFixOff
+            else -> Icons.Default.Edit
+        }
+        Icon(icon, description, tint=tint,
+            modifier=Modifier.align(Alignment.BottomStart).padding(start=2.dp,bottom=2.dp).size(28.dp))
+        if(id=="marker_single" || id=="marker_ruler_single") {
+            Row(Modifier.align(Alignment.TopEnd)
+                    .background(MaterialTheme.colorScheme.surface,RoundedCornerShape(3.dp))
+                    .border(1.dp,MaterialTheme.colorScheme.outline,RoundedCornerShape(3.dp))
+                    .padding(horizontal=1.dp),
+                verticalAlignment=Alignment.CenterVertically) {
+                Icon(Icons.Default.Layers,null,tint=tint,modifier=Modifier.size(12.dp))
+                Text("1",color=tint,fontSize=11.sp,fontWeight=FontWeight.Bold,lineHeight=12.sp)
+            }
+        }
+        if(id=="marker_ruler" || id=="marker_ruler_single" || id=="pen_ruler") {
+            Icon(Icons.Default.Straighten,null,tint=tint,
+                modifier=Modifier.align(Alignment.BottomEnd).size(13.dp)
+                    .background(MaterialTheme.colorScheme.surface,RoundedCornerShape(2.dp)))
+        }
+    }
+}
+
+@Composable
+private fun Q7HInkSwatch(c: InkPaletteColor, selected: Long, onColor: (Long) -> Unit) {
+    val chosen = selected == c.argb
+    Box(Modifier.padding(horizontal = 3.dp, vertical = 4.dp).size(25.dp)
+        .background(Color(c.argb.toInt()), CircleShape)
+        .border(if (chosen) 3.dp else 1.dp,
+            if (chosen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+            CircleShape)
+        .clickable { onColor(c.argb) })
+}
+
+/** Compact palette: Tajweed colors first; then neutrals, purple and user colors. */
+@Composable
+private fun Q7HInkPalette(
+    palette: List<InkPaletteColor>, pinned: Boolean,
+    color: Long, onColor: (Long) -> Unit,
+    onAdd: () -> Unit, onlyFirstRow: Boolean = false
+) {
+    val tajweed=palette.filter { it.tajweed }.sortedBy { it.sortOrder }
+    val extras=listOf(
+        InkPaletteColor(-101,0xFF202020L,"Чёрный",10000,false,false),
+        InkPaletteColor(-102,0xFFFFFFFFL,"Белый",10001,false,false),
+        InkPaletteColor(-103,0xFFD8C5A6L,"Бежевый",10002,false,false),
+        InkPaletteColor(-104,0xFFAF72DCL,"Фиолетовый",10003,false,false)
+    )
+    val chosen=(extras + palette.filter { it.custom }.sortedBy { it.sortOrder })
+        .distinctBy { it.argb }.filterNot { entry -> tajweed.any { it.argb==entry.argb } }
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        verticalAlignment=Alignment.CenterVertically) {
+        tajweed.forEach { Q7HInkSwatch(it,color,onColor) }
+        VerticalDivider(Modifier.height(30.dp).padding(horizontal=6.dp),
+            thickness=1.dp,color=MaterialTheme.colorScheme.outlineVariant)
+        chosen.forEach { Q7HInkSwatch(it,color,onColor) }
+        IconButton(onClick=onAdd,modifier=Modifier.size(36.dp)) {
+            Icon(Icons.Default.AddCircleOutline,"Добавить свой цвет через RGB")
+        }
+    }
+}
+
+/** Safe, movable reader palette. State and positions are owned/persisted by MainActivity. */
 @Composable
 internal fun InkToolbar(
     tool: String, onTool: (String) -> Unit,
     color: Long, onColor: (Long) -> Unit,
     thickness: Float, onThickness: (Float) -> Unit,
+    palette: List<InkPaletteColor>, pinnedTajweed: Boolean,
+    orderedTools: List<String>, smartPrefs: UserPreferences,
+    onCreateColor: (Long, String) -> Unit,
+    onSave: () -> Unit,
     onUndo: () -> Unit, onRedo: () -> Unit, onClear: () -> Unit,
     canUndo: Boolean, canRedo: Boolean, canClear: Boolean,
     onVerticalDrag: (Float) -> Unit,
-    onDragFinished: () -> Unit
+    onHorizontalDrag: (Float) -> Unit,
+    onDragFinished: () -> Unit,
+    state: String,
+    collapsedSlider: Boolean,
+    collapsedTools: Boolean,
+    collapsedTajweed: Boolean,
+    doubleTapSquare: Boolean,
+    longPressCompact: Boolean,
+    onCollapse: () -> Unit,
+    onMinimize: () -> Unit,
+    maxPanelHeight: androidx.compose.ui.unit.Dp = 440.dp,
+    modifier: Modifier = Modifier
 ) {
+    var openInfo by remember { mutableStateOf(false) }
+    var openSettings by remember { mutableStateOf(false) }
+    var openRgb by remember { mutableStateOf(false) }
     val density = LocalDensity.current
+    val haptic = LocalHapticFeedback.current
     val onSurface = MaterialTheme.colorScheme.onSurface
     val dimmed = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .65f)
-    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface,
-        contentColor = onSurface, tonalElevation = 8.dp, shadowElevation = 4.dp) {
-        Column(Modifier.widthIn(max = 380.dp).padding(8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Box(Modifier.fillMaxWidth().height(28.dp)
+    // Listen at the SURFACE boundary, not on individual tool icons.
+    // Compose cancels the parent gesture when an interactive child consumes
+    // its pointer events. This leaves buttons, colours and the slider intact.
+    val freeAreaTapGestures = if (doubleTapSquare || longPressCompact) Modifier.pointerInput(
+        state, doubleTapSquare, longPressCompact
+    ) {
+        detectTapGestures(
+            onDoubleTap = if (doubleTapSquare) ({ _ ->
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onMinimize()
+            }) else null,
+            onLongPress = if (longPressCompact) ({ _ ->
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onCollapse()
+            }) else null
+        )
+    } else Modifier
+    // Dragging on the handle and any free part of the surface never intercepts
+    // a button press or a slider gesture; those child controls consume their input.
+    val freeAreaDrag = Modifier.pointerInput(state) {
+        detectDragGestures(
+            onDragEnd = onDragFinished,
+            onDragCancel = onDragFinished
+        ) { change, drag ->
+            change.consume()
+            onVerticalDrag(with(density) { drag.y.toDp().value })
+            onHorizontalDrag(with(density) { drag.x.toDp().value })
+        }
+    }
+    // Two independent, tall grips prevent the top handle from becoming the
+    // only way to retrieve a palette. Blank areas retain free-area dragging.
+    val gripDrag = Modifier.pointerInput(state) {
+        detectDragGestures(
+            onDragEnd = onDragFinished,
+            onDragCancel = onDragFinished
+        ) { change, drag ->
+            change.consume()
+            onVerticalDrag(with(density) { drag.y.toDp().value })
+            onHorizontalDrag(with(density) { drag.x.toDp().value })
+        }
+    }
+    if(state=="square") {
+        Surface(modifier=modifier.size(54.dp),shape=RoundedCornerShape(13.dp),
+            color=MaterialTheme.colorScheme.surface,tonalElevation=8.dp,shadowElevation=4.dp) {
+            Box(Modifier.fillMaxSize()
                 .pointerInput(Unit) {
-                    detectVerticalDragGestures(
-                        onVerticalDrag = { change, drag ->
-                            change.consume()
-                            onVerticalDrag(with(density) { drag.toDp().value })
-                        },
-                        onDragEnd = onDragFinished,
-                        onDragCancel = onDragFinished
-                    )
-                }, contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.DragHandle, "Переместить панель вверх или вниз", tint = onSurface)
-            }
-            Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
-                listOf(Triple("pen", "Ручка", Icons.Default.Edit),
-                    Triple("marker", "Маркер", Icons.Default.BorderColor),
-                    Triple("cover", "Скрыть", Icons.Default.BlurOn),
-                    Triple("text", "Текст", Icons.Default.TextFields),
-                    Triple("box", "Рамка", Icons.Default.CropSquare),
-                    Triple("eraser", "Ластик", Icons.Default.AutoFixOff)).forEach { (key, label, icon) ->
-                    IconToggleButton(checked = tool == key, onCheckedChange = { onTool(key) }) {
-                        Icon(icon, label,
-                            tint = if (tool == key) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurface)
+                    detectDragGesturesAfterLongPress(
+                        onDragStart={haptic.performHapticFeedback(HapticFeedbackType.LongPress)},
+                        onDragCancel=onDragFinished,onDragEnd=onDragFinished
+                    ) { change, drag ->
+                        change.consume()
+                        onVerticalDrag(with(density){ drag.y.toDp().value })
+                        onHorizontalDrag(with(density){ drag.x.toDp().value })
                     }
                 }
-                IconButton(onClick = onUndo, enabled = canUndo) {
-                    Icon(Icons.Default.Undo, "Отменить", tint = if (canUndo) onSurface else dimmed)
+                .clickable(onClick=onMinimize),contentAlignment=Alignment.Center) {
+                Icon(Icons.Default.OpenInFull,"Развернуть графическую панель")
+            }
+        }
+        return
+    }
+    Surface(modifier=modifier.heightIn(max=maxPanelHeight)
+            .then(freeAreaDrag).then(freeAreaTapGestures),
+        shape=RoundedCornerShape(18.dp),
+        color=MaterialTheme.colorScheme.surface,
+        contentColor=onSurface, tonalElevation=8.dp, shadowElevation=4.dp
+    ) {
+        Column(Modifier.widthIn(max=380.dp).heightIn(max=maxPanelHeight)
+                .padding(horizontal=8.dp,vertical=5.dp),
+            verticalArrangement=Arrangement.spacedBy(3.dp)) {
+            Row(Modifier.fillMaxWidth().height(44.dp),
+                verticalAlignment=Alignment.CenterVertically,
+                horizontalArrangement=Arrangement.SpaceBetween) {
+                Box(Modifier.weight(1f).fillMaxHeight().then(gripDrag),
+                    contentAlignment=Alignment.Center) {
+                    Icon(Icons.Default.DragHandle,"Перетащить палитру (верхний захват)",
+                        modifier=Modifier.size(30.dp),tint=onSurface)
                 }
-                IconButton(onClick = onRedo, enabled = canRedo) {
-                    Icon(Icons.Default.Redo, "Повторить", tint = if (canRedo) onSurface else dimmed)
-                }
-                IconButton(onClick = onClear, enabled = canClear) {
-                    Icon(Icons.Default.DeleteSweep, "Удалить все пометки", tint = if (canClear) onSurface else dimmed)
+                IconButton(onClick=onMinimize, modifier=Modifier.size(30.dp)) {
+                    Icon(Icons.Default.CloseFullscreen,"Свернуть до квадрата",Modifier.size(19.dp))
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                listOf(0xFFE64F4FL,0xFFFFC848L,0xFF4EA6DAL,0xFF4DAD74L,0xFFAF72DCL,
-                    0xFF202020L,0xFFFFFFFFL).forEach { c ->
-                    Box(Modifier.padding(horizontal = 3.dp).size(22.dp)
-                        .background(Color(c.toInt()), CircleShape)
-                        .then(if (color == c) Modifier.border(2.dp,
-                            MaterialTheme.colorScheme.primary, CircleShape) else Modifier)
-                        .pointerInput(c) {
-                            detectTapGestures(onTap = { onColor(c) })
-                        })
+            Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.Center,
+                verticalAlignment=Alignment.CenterVertically) {
+                IconButton(onClick=onUndo,enabled=canUndo,modifier=Modifier.size(46.dp)) {
+                    Icon(Icons.Default.Undo,"Отменить",tint=if(canUndo)onSurface else dimmed)
                 }
-                Slider(value = thickness, onValueChange = onThickness,
-                    valueRange = .002f..0.20f, modifier = Modifier.weight(1f).padding(start = 8.dp))
+                IconButton(onClick=onRedo,enabled=canRedo,modifier=Modifier.size(46.dp)) {
+                    Icon(Icons.Default.Redo,"Повторить",tint=if(canRedo)onSurface else dimmed)
+                }
+                IconButton(onClick=onClear,enabled=canClear,modifier=Modifier.size(46.dp)) {
+                    Icon(Icons.Default.DeleteSweep,"Удалить все пометки",tint=if(canClear)onSurface else dimmed)
+                }
+                IconButton(onClick=onSave,modifier=Modifier.size(46.dp)) {
+                    Icon(Icons.Default.CheckCircle,"Сохранить изменения и завершить",
+                        tint=MaterialTheme.colorScheme.primary)
+                }
+                IconButton(onClick=onCollapse,modifier=Modifier.size(46.dp)) {
+                    Icon(if(state=="collapsed") Icons.Default.UnfoldMore else Icons.Default.UnfoldLess,
+                        if(state=="collapsed") "Развернуть палитру" else "Свернуть палитру")
+                }
+            }
+            // Only the content between the two grips scrolls. Drag handles stay
+            // in view even when a short phone or landscape viewport cannot fit
+            // the entire set of tools, colors and thickness controls.
+            Column(Modifier.fillMaxWidth().weight(1f, fill=false)
+                .verticalScroll(rememberScrollState()),
+                verticalArrangement=Arrangement.spacedBy(3.dp)) {
+            if(state=="expanded" || collapsedTools) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    verticalAlignment=Alignment.CenterVertically,
+                    horizontalArrangement=Arrangement.spacedBy(3.dp)) {
+                    FilterChip(selected=tool=="smart_marker",onClick={onTool("smart_marker")},
+                        label={Text("Умный выделитель аятов",fontSize=12.sp)},
+                        leadingIcon={Icon(Icons.Default.AutoAwesome,null,Modifier.size(16.dp))})
+                    Box {
+                        IconButton(onClick={openInfo=true},modifier=Modifier.size(34.dp)) {
+                            Icon(Icons.Outlined.Info,"Информация об умном выделителе",Modifier.size(19.dp))
+                        }
+                        DropdownMenu(expanded=openInfo,onDismissRequest={openInfo=false},
+                            modifier=Modifier.widthIn(min=260.dp,max=320.dp)) {
+                            Text("Умный выделитель аятов выделяет один аят двойным касанием. " +
+                                "Удаление выделения — удержанием с таймером 3 секунды. " +
+                                "Жесты можно изменить: одиночное, двойное, обычное удержание " +
+                                "или удержание с обратным отсчётом. " +
+                                "При отпускании пальца до конца отсчёта действие отменяется.",
+                                modifier=Modifier.padding(14.dp),style=MaterialTheme.typography.bodySmall)
+                            TextButton(onClick={openInfo=false},modifier=Modifier.align(Alignment.End)) {
+                                Text("Закрыть")
+                            }
+                        }
+                    }
+                    TextButton(onClick={openSettings=true},modifier=Modifier.height(36.dp),
+                        contentPadding=PaddingValues(horizontal=4.dp)) {
+                        Text("Настроить",fontSize=11.sp)
+                    }
+                }
+            }
+            if(state=="expanded" || collapsedTools) {
+                // Tools are always horizontally scrollable, even with 11 IDs.
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    verticalAlignment=Alignment.CenterVertically) {
+                    orderedTools.filterNot { it == "smart_marker" }.forEach { id ->
+                        IconToggleButton(checked=tool==id,onCheckedChange={onTool(id)},
+                            modifier=Modifier.size(52.dp)) {
+                            Q7HInkToolIcon(id,Q7HInkToolLabels.names[id]?:id,
+                                if(tool==id)MaterialTheme.colorScheme.primary else onSurface)
+                        }
+                    }
+                }
+            }
+            if(state=="expanded" || collapsedTajweed) {
+                Q7HInkPalette(palette,pinnedTajweed,color,onColor,onAdd={openRgb=true})
+            }
+            if(state=="expanded" || collapsedSlider) {
+                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                    Text("Толщина",style=MaterialTheme.typography.labelSmall)
+                    Slider(value=thickness,onValueChange=onThickness,
+                        valueRange=.002f..0.20f,
+                        modifier=Modifier.weight(1f).padding(start=8.dp))
+                }
+            }
+            } // end scrollable body; bottom handle is OUTSIDE the scroll area
+            // Bottom grip remains reachable when the palette is tall or
+            // the top row was previously placed near a screen edge.
+            Box(Modifier.fillMaxWidth().height(44.dp).then(gripDrag),
+                contentAlignment=Alignment.Center) {
+                Icon(Icons.Default.DragHandle,
+                    "Перетащить палитру за две полоски внизу",
+                    modifier=Modifier.size(30.dp), tint=onSurface)
             }
         }
     }
+    if(openSettings) AlertDialog(onDismissRequest={openSettings=false},
+        title={Text("Умный выделитель аятов")},
+        text={Column(Modifier.fillMaxWidth().heightIn(max=490.dp).verticalScroll(rememberScrollState())) {
+            Q7HSmartMarkerSettings(smartPrefs)
+        }},
+        confirmButton={TextButton(onClick={openSettings=false}){Text("Готово")}})
+    if(openRgb) Q7HInkColorEditor(initial=null,onDismiss={openRgb=false},
+        onSave={value,meaning -> onCreateColor(value,meaning);openRgb=false})
 }

@@ -1,6 +1,7 @@
 package raf.console.quran7hours.ui
 
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.material3.MaterialTheme
@@ -115,7 +116,9 @@ internal fun Q7HFootnoteText(
 ) {
     val markers = remember(text, paragraphId) { Q7HFootnoteMarkers.parse(text, paragraphId) }
     if (markers.isEmpty()) {
-        Text(text = text, modifier = modifier, style = style, color = color)
+        SelectionContainer {
+            Text(text = text, modifier = modifier, style = style, color = color)
+        }
         return
     }
     val requester = remember(paragraphId) { BringIntoViewRequester() }
@@ -146,6 +149,7 @@ internal fun Q7HFootnoteText(
         markers.forEach { navigator.register(Q7HFootnoteNavigator.Target(it, requester, layout)) }
         onDispose { markers.forEach { navigator.unregister(it.id) } }
     }
+    SelectionContainer {
     Text(
         text = richText,
         modifier = modifier
@@ -167,4 +171,5 @@ internal fun Q7HFootnoteText(
         style = style,
         color = color
     )
+    }
 }

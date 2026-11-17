@@ -5,6 +5,15 @@ import android.os.Bundle
 import android.util.Log
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.platform.LocalDensity
+import android.os.SystemClock
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.animation.core.Animatable
@@ -73,12 +82,58 @@ class MainActivity : ComponentActivity() {
         } catch (error: Exception) {
             Log.e("Q7HBackup", "Cannot restore pending backup", error)
         }
+        // Restore may have replaced the backup schedule preferences.
+        // Reconcile WorkManager with restored settings before rendering UI.
+        try { Q7HBackupSchedule.refresh(this) }
+        catch (e: Exception) { Log.w("Q7HBackup", "Unable to schedule backups", e) }
         setContent { Quran7HoursScreen(this) }
     }
 }
 
-internal enum class SheetSection { AUDIO, TAFSIR, HAFIZ, SETTINGS }
+enum class SheetSection { AUDIO, TAFSIR, HAFIZ, SETTINGS }
 private enum class DrawerSection { CONTENTS, BOOKMARKS, NOTES }
+
+/**
+ * Normalized positions are stored in SharedPreferences (and included in user backups).
+ * The floating square has a visible edge margin, while the full editor uses all
+ * available drag space. These same bounds are used for BOTH placement and dragging,
+ * preventing the square from jumping when the saved position is restored.
+ */
+private data class Q7HInkPositionBounds(
+    val startX: Float,
+    val startY: Float,
+    val travelX: Float,
+    val travelY: Float
+) {
+    fun xAt(normalized: Float): Float = startX + normalized.coerceIn(0f, 1f) * travelX
+    fun yAt(normalized: Float): Float = startY + normalized.coerceIn(0f, 1f) * travelY
+    fun normalizedX(pixel: Float): Float =
+        if (travelX > 0f) ((pixel - startX) / travelX).coerceIn(0f, 1f) else .5f
+    fun normalizedY(pixel: Float): Float =
+        if (travelY > 0f) ((pixel - startY) / travelY).coerceIn(0f, 1f) else .5f
+}
+
+private fun q7hInkPositionBounds(
+    host: IntSize,
+    panel: IntSize,
+    square: Boolean,
+    density: Float
+): Q7HInkPositionBounds {
+    val roomX = (host.width - panel.width).coerceAtLeast(0).toFloat()
+    val roomY = (host.height - panel.height).coerceAtLeast(0).toFloat()
+    if (!square) return Q7HInkPositionBounds(0f, 0f, roomX, roomY)
+    // Reserve margins INSIDE the viewport, also on devices with display cutouts.
+    // If the viewport is very small, scale margins down rather than hiding content.
+    val left = minOf(16f * density, roomX / 2f)
+    val right = minOf(16f * density, (roomX - left).coerceAtLeast(0f))
+    val top = minOf(12f * density, roomY / 2f)
+    val bottom = minOf(28f * density, (roomY - top).coerceAtLeast(0f))
+    return Q7HInkPositionBounds(
+        left, top,
+        (roomX - left - right).coerceAtLeast(0f),
+        (roomY - top - bottom).coerceAtLeast(0f)
+    )
+}
 
 /** A UI snapshot ensures both players are observed independently by Compose. */
 data class PlaybackSnapshot(
@@ -124,11 +179,17 @@ private fun Quran7HoursScreen(activity: MainActivity) {
     val timings = remember { TimingCatalog(context) }
     val hadrConnection = remember { AudioConnection(context, AudioChannel.HADR) }
     val ayahConnection = remember { AudioConnection(context, AudioChannel.AYAH) }
+    val hafizConnection = remember { AudioConnection(context, AudioChannel.HAFIZ) }
 
     var hadrController by remember { mutableStateOf<MediaController?>(null) }
     var ayahController by remember { mutableStateOf<MediaController?>(null) }
+    var hafizController by remember { mutableStateOf<MediaController?>(null) }
     var hadrSnapshot by remember { mutableStateOf(PlaybackSnapshot()) }
     var ayahSnapshot by remember { mutableStateOf(PlaybackSnapshot()) }
+    var hafizSnapshot by remember { mutableStateOf(PlaybackSnapshot()) }
+    var separateHafiz by remember { mutableStateOf(prefs.separateHafizPlayer) }
+    var hafizMode by remember { mutableStateOf(AyahEndMode.entries.firstOrNull {
+        it.name == prefs.hafizEndMode } ?: AyahEndMode.STOP) }
     var reciters by remember { mutableStateOf<List<Reciter>>(emptyList()) }
     var reciterError by remember { mutableStateOf("") }
     var recitersRequested by remember { mutableStateOf(false) }
@@ -169,13 +230,61 @@ private fun Quran7HoursScreen(activity: MainActivity) {
     var noteEditor by remember { mutableStateOf<LearningNote?>(null) }
     var inkEditing by remember { mutableStateOf(false) }
     var showInk by remember { mutableStateOf(prefs.inkVisible) }
-    var inkTool by remember { mutableStateOf("pen") }
-    var inkColor by remember { mutableLongStateOf(0xFFE64F4FL) }
-    var inkSize by remember { mutableFloatStateOf(.010f) }
-    var inkToolbarOffsetDp by rememberSaveable { mutableFloatStateOf(prefs.inkToolbarOffsetDp) }
-    val screenHeightDp = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.toFloat()
+    var inkTool by remember { mutableStateOf(prefs.inkDefaultTool) }
+    var inkColor by remember { mutableLongStateOf(prefs.inkSelectedColor) }
+    var inkSize by remember { mutableFloatStateOf(prefs.inkStrokeSize) }
+    var inkPalette by remember { mutableStateOf(learningDb.inkColors()) }
+    var inkToolbarState by remember { mutableStateOf(prefs.inkToolbarState) }
+    var inkPanelX by remember { mutableFloatStateOf(prefs.inkPanelX.takeIf { it.isFinite() }?.coerceIn(0f,1f) ?: 0.5f) }
+    var inkPanelY by remember { mutableFloatStateOf(prefs.inkPanelY.takeIf { it.isFinite() }?.coerceIn(0f,1f) ?: 0.5f) }
+    var inkSquareX by remember { mutableFloatStateOf(prefs.inkSquareX.takeIf { it.isFinite() }?.coerceIn(0f,1f) ?: 0.5f) }
+    var inkSquareY by remember { mutableFloatStateOf(prefs.inkSquareY.takeIf { it.isFinite() }?.coerceIn(0f,1f) ?: 0.5f) }
+    var inkPanelSize by remember { mutableStateOf(IntSize.Zero) }
+    var inkHostSize by remember { mutableStateOf(IntSize.Zero) }
+    var inkDraft by remember { mutableStateOf<InkStroke?>(null) }
+    var inkExitPrompt by remember { mutableStateOf(false) }
+    var lastInkDraftWrite by remember { mutableLongStateOf(0L) }
+    val inkDensity = LocalDensity.current
+    fun persistInkPosition() {
+        if(inkToolbarState=="square") {
+            prefs.inkSquareX=inkSquareX; prefs.inkSquareY=inkSquareY
+        } else { prefs.inkPanelX=inkPanelX; prefs.inkPanelY=inkPanelY }
+        prefs.inkToolbarState=inkToolbarState
+    }
+    fun inkMove(dxPx:Float,dyPx:Float) {
+        val square = inkToolbarState == "square"
+        val bounds = q7hInkPositionBounds(
+            inkHostSize, inkPanelSize, square, inkDensity.density
+        )
+        val posX = if (square) inkSquareX else inkPanelX
+        val posY = if (square) inkSquareY else inkPanelY
+        val xx = bounds.xAt(posX) + dxPx
+        val yy = bounds.yAt(posY) + dyPx
+        val beyond = with(inkDensity) { 18.dp.toPx() }
+        if (!square && (xx < -beyond || xx > bounds.travelX + beyond ||
+                yy < -beyond || yy > bounds.travelY + beyond)) {
+            // Keep the user's last square location even when the full palette
+            // is dragged outside its safe area.
+            inkToolbarState = "square"
+            persistInkPosition()
+        } else if (square) {
+            inkSquareX = bounds.normalizedX(xx)
+            inkSquareY = bounds.normalizedY(yy)
+        } else {
+            inkPanelX = bounds.normalizedX(xx)
+            inkPanelY = bounds.normalizedY(yy)
+        }
+    }
     var clearInkDialog by remember { mutableStateOf(false) }
     var showToolbarPageJump by rememberSaveable { mutableStateOf(false) }
+    // Incrementing request numbers lets each panel open its own range dialog from the persistent dock.
+    var bottomRangeSerial by remember { mutableIntStateOf(0) }
+    var bottomRangeSection by remember { mutableStateOf(SheetSection.AUDIO) }
+    fun requestBottomRange(target: SheetSection) {
+        bottomRangeSection = target
+        bottomRangeSerial++
+    }
+
     var drawerTab by remember { mutableStateOf(DrawerSection.CONTENTS) }
     var notesSegment by remember { mutableIntStateOf(0) }
     var bookmarkSegment by remember { mutableIntStateOf(0) }
@@ -183,6 +292,13 @@ private fun Quran7HoursScreen(activity: MainActivity) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val pager = rememberPagerState(initialPage = prefs.lastPage - 1, pageCount = { QuranCatalog.TOTAL_PAGES })
     val page = pager.currentPage + 1
+    Q7HReaderOptions.load(context)
+    Q7HBottomNavSettings.load(context)
+    val bottomNavigation = Q7HBottomNavSettings.enabled
+    val diaryConnection = if(separateHafiz) hafizConnection else ayahConnection
+    val diaryController = if(separateHafiz) hafizController else ayahController
+    val diarySnapshot = if(separateHafiz) hafizSnapshot else ayahSnapshot
+    val diaryMode = if(separateHafiz) hafizMode else ayahMode
     LaunchedEffect(page) { QpcPreparedPages.start(context.applicationContext,tafsir,page) }
     LaunchedEffect(sheetVisibility.value) {
         if(sheet!=null && !sheetVisibility.value.includes(sheet!!)) sheet=SheetSection.SETTINGS
@@ -201,9 +317,100 @@ private fun Quran7HoursScreen(activity: MainActivity) {
     val inkUndoHistory = remember(page) { mutableStateListOf<List<InkStroke>>() }
     val inkRedoHistory = remember(page) { mutableStateListOf<List<InkStroke>>() }
     var inkCheckpoint by remember(page) { mutableStateOf(inkStrokes.toList()) }
+    val inkSessionSnapshots=remember { mutableStateMapOf<Int,List<InkStroke>>() }
+    var smartUndoBefore by remember { mutableStateOf<Map<Int,List<InkStroke>>?>(null) }
+    var smartUndoAfter by remember { mutableStateOf<Map<Int,List<InkStroke>>?>(null) }
+    var smartRedoAfter by remember { mutableStateOf<Map<Int,List<InkStroke>>?>(null) }
+    var smartRedoBefore by remember { mutableStateOf<Map<Int,List<InkStroke>>?>(null) }
+    var inkSessionBaseline by remember(page) { mutableStateOf(inkStrokes.toList()) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val currentInkPage = rememberUpdatedState(page)
+    val currentInkStrokes = rememberUpdatedState(inkStrokes)
+    val currentInkDraft = rememberUpdatedState(inkDraft)
+    DisposableEffect(lifecycleOwner, learningDb) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                runCatching {
+                    learningDb.saveInk(currentInkPage.value,
+                        currentInkStrokes.value.toList() + listOfNotNull(currentInkDraft.value))
+                }.onFailure { Log.e("Q7HInk", "Unable to flush notes on pause", it) }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    // Back always gives an explicit save/discard choice; Android process death
+    // cannot erase completed strokes, which are persisted after each gesture.
+    BackHandler(enabled=inkEditing && !inkExitPrompt) { inkExitPrompt=true }
+    if(inkExitPrompt) AlertDialog(
+        onDismissRequest={inkExitPrompt=false},
+        title={Text("Сохранить изменения?")},
+        text={Text("Графические пометки можно сохранить или выйти без новых изменений.")},
+        confirmButton={TextButton(onClick={
+            learningDb.saveInk(page,inkStrokes.toList()+listOfNotNull(inkDraft))
+            inkDraft=null; inkEditing=false; inkExitPrompt=false
+            inkSessionSnapshots.clear()
+            smartUndoBefore=null;smartUndoAfter=null;smartRedoAfter=null;smartRedoBefore=null
+        }){Text("Сохранить")}},
+        dismissButton={Row {
+            TextButton(onClick={
+                inkSessionSnapshots.forEach { (changedPage, original) ->
+                    val list=strokesForPage(changedPage)
+                    list.clear();list.addAll(original)
+                    learningDb.saveInk(changedPage,original)
+                }
+                inkCheckpoint=inkStrokes.toList()
+                inkUndoHistory.clear();inkRedoHistory.clear()
+                inkDraft=null;inkEditing=false;inkExitPrompt=false
+                inkSessionSnapshots.clear()
+                smartUndoBefore=null;smartUndoAfter=null;smartRedoAfter=null;smartRedoBefore=null
+            }){Text("Без сохранения")}
+            TextButton(onClick={inkExitPrompt=false}){Text("Отмена")}
+        }}
+    )
+    LaunchedEffect(inkToolbarState, inkPanelSize, inkHostSize) {
+        if(inkHostSize.width>0 && inkHostSize.height>0 &&
+            inkPanelSize.width>0 && inkPanelSize.height>0 && inkToolbarState!="square" &&
+            (inkPanelSize.width>inkHostSize.width || inkPanelSize.height>inkHostSize.height)) {
+            if (inkToolbarState == "expanded") {
+                inkToolbarState = "collapsed"
+                inkPanelY = 0f
+            } else {
+                inkToolbarState = "square"
+                // The last manually selected square position remains unchanged.
+            }
+            persistInkPosition()
+        }
+    }
+    LaunchedEffect(inkEditing) {
+        if (inkEditing && !prefs.inkPositionRecoveredV5) {
+            // One-time recovery: safely show the full palette from its TOP edge.
+            // Later user positioning is always respected, including in backups.
+            inkToolbarState = "expanded"
+            inkPanelX = .5f
+            inkPanelY = .03f
+            prefs.inkPanelX = inkPanelX
+            prefs.inkPanelY = inkPanelY
+            persistInkPosition()
+            prefs.inkPositionRecoveredV5 = true
+        }
+    }
+    // Sync user-edited Room palette when returning from Settings or opening drawing mode.
+    LaunchedEffect(sheet, inkEditing) {
+        if (sheet == null || inkEditing) inkPalette = learningDb.inkColors()
+    }
     val systemDark = isSystemInDarkTheme()
     val dark = when (themeMode) { "dark" -> true; "light" -> false; else -> systemDark }
     val variant = mushaf.variant(dark, tajweed)
+    // Live values prevent an asynchronous smart selection from writing to a
+    // different page or theme after the reader turns pages / changes theme.
+    val liveSmartPage = rememberUpdatedState(page)
+    val liveSmartVariant = rememberUpdatedState(variant)
+    val liveSmartEditing = rememberUpdatedState(inkEditing)
+    // Any transition away and back invalidates pending async selection results.
+    val smartEnvironment = remember(page, variant, inkEditing) { Any() }
+    val liveSmartEnvironment = rememberUpdatedState(smartEnvironment)
+    val smartTapEpoch = remember { java.util.concurrent.atomic.AtomicLong(0L) }
     var playingSurah by remember { mutableStateOf<Int?>(null) }
     var controlsVisible by rememberSaveable { mutableStateOf(false) }
     var controlsLocked by rememberSaveable { mutableStateOf(false) }
@@ -229,13 +436,21 @@ private fun Quran7HoursScreen(activity: MainActivity) {
             .onSuccess { ayahController = it }
             .onFailure { notice = "Плеер аятов: ${it.localizedMessage}" }
     }
-    DisposableEffect(Unit) { onDispose { hadrConnection.close(); ayahConnection.close() } }
+    LaunchedEffect(Unit) {
+        runCatching { hafizConnection.connect() }
+            .onSuccess { hafizController = it }
+            .onFailure { notice = "Плеер Дневника хафиза: ${it.localizedMessage}" }
+    }
+    DisposableEffect(Unit) { onDispose {
+        hadrConnection.close(); ayahConnection.close(); hafizConnection.close()
+    } }
 
-    LaunchedEffect(hadrController, ayahController) {
+    LaunchedEffect(hadrController, ayahController, hafizController) {
         while (isActive) {
             hadrSnapshot = snapshot(hadrController)
             ayahSnapshot = snapshot(ayahController)
-            delay(450)
+            hafizSnapshot = snapshot(hafizController)
+            delay(300)
         }
     }
     // Load the HTTPS-only reciter list only while Tafsir is visible. A cancelled request
@@ -249,9 +464,21 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                 onSuccess = { list ->
                     reciters = list
                     reciterError = if (list.size == 43) "" else "Получено ${list.size} репозиториев вместо 43"
-                    if (list.isNotEmpty() && list.none { it.repository == selectedReciter }) {
-                        selectedReciter = list.first().repository
-                        prefs.selectedReciter = selectedReciter
+                    if(list.isNotEmpty()) {
+                        val shatri=list.firstOrNull {
+                            it.repository.removePrefix("q7h_").lowercase() in
+                                setOf("shatri","abubakrshatri","abubakrashshaatree")
+                        } ?: list.first()
+                        val suwaidAlias=selectedReciter.removePrefix("q7h_").lowercase() in
+                            setOf("aymansowaid","aymansuwaid")
+                        val manual=prefs.manuallySelectedReciter
+                        val desired=when {
+                            manual.isNotBlank() && list.any { it.repository==manual } -> manual
+                            selectedReciter.isBlank() || suwaidAlias || list.none { it.repository==selectedReciter } -> shatri.repository
+                            else -> selectedReciter
+                        }
+                        selectedReciter=desired
+                        if(prefs.selectedReciter!=desired) prefs.selectedReciter=desired
                     }
                 },
                 onFailure = { reciterError = it.localizedMessage ?: "Ошибка загрузки чтецов" }
@@ -400,6 +627,49 @@ private fun Quran7HoursScreen(activity: MainActivity) {
         } else ayahConnection.playAyah(reciter, surah, verse, ayahMode)
     }
 
+    fun playDiaryVerse(surah: Int, verse: Int) {
+        if(!separateHafiz) { playVerse(surah,verse); return }
+        val reciter=reciters.firstOrNull { it.repository==selectedReciter }
+        val controller=hafizController
+        if(reciter==null || controller==null) {
+            notice="Плеер Дневника хафиза ещё не готов";return
+        }
+        val id="ayah:$surah:$verse:${reciter.repository}:${reciter.branch}"
+        if(hafizSnapshot.mediaId==id) {
+            if(hafizSnapshot.playing) controller.pause()
+            else {
+                if(hafizSnapshot.ended) controller.seekTo(0L)
+                controller.play()
+            }
+        } else hafizConnection.playAyah(reciter,surah,verse,hafizMode)
+    }
+    fun openAyahBookmark(surah: Int, verse: Int) {
+        val target=Q7HReaderOptions.bookmarkTarget
+        preferredSheet=target
+        prefs.lastSheetSection=target.name
+        Q7HAyahJumpBus.open(surah,verse,target)
+        sheet=target
+        goToAyah(surah,verse)
+        scope.launch { drawerState.close() }
+    }
+    fun quoteIntoNote(surah:Int,verse:Int,selected:String) {
+        val source=selected.trim()
+        if(source.isBlank()) return
+        val old=learningNotes.firstOrNull { it.scope==NoteScope.AYAH &&
+            it.surah==surah && it.firstAyah==verse }
+        val content=if(old?.body.isNullOrBlank()) "> $source"
+            else old!!.body.trimEnd()+"\n\n> $source"
+        noteEditor=(old ?: LearningNote(scope=NoteScope.AYAH,surah=surah,
+            firstAyah=verse,lastAyah=verse)).copy(body=content)
+    }
+    fun switchSheet(target: SheetSection) {
+        // Pending contextual dialogs belong to their originating section only.
+        bottomRangeSerial = 0
+        // Explicit navigation must always be able to reach all four sections.
+        preferredSheet=target
+        prefs.lastSheetSection=target.name
+        sheet=target
+    }
     Q7HTheme(themeMode, palette, contrast, canvasColor) {
         val sheetState = rememberModalBottomSheetState(
             skipPartiallyExpanded = true,
@@ -467,10 +737,8 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                             bookmarkId = mark.id)
                                 }
                             ) else Q7HAyahBookmarksDrawer(
-                                onOpen = { s, a ->
-                                    goToAyah(s, a)
-                                    scope.launch { drawerState.close() }
-                                },
+                                database = learningDb,
+                                onOpen = { s, a -> openAyahBookmark(s,a) },
                                 onNote = { s, a ->
                                     noteEditor = learningNotes.firstOrNull {
                                         it.scope == NoteScope.AYAH && it.surah == s && it.firstAyah == a
@@ -523,6 +791,7 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                     .background(canvasColor)
                     .windowInsetsPadding(WindowInsets.navigationBars)
                     .windowInsetsPadding(WindowInsets.displayCutout)
+                    .onSizeChanged { inkHostSize = it }
             ) {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                     HorizontalPager(
@@ -596,6 +865,193 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                         editable = inkEditing && leafPage == page,
                                         // Use the physical page backdrop, not the outgoing page.
                                         coverColor = inkBackdrop,
+                                        darkPage = dark,
+                                        smartPrefs = prefs,
+                                        onDraft = { draft ->
+                                            if (leafPage == page) {
+                                                inkDraft=draft
+                                                val now=SystemClock.uptimeMillis()
+                                                if(draft==null || now-lastInkDraftWrite>=280L) {
+                                                    // Capture even an unfinished gesture before a process kill.
+                                                    learningDb.saveInk(leafPage,
+                                                        leafStrokes.toList()+listOfNotNull(draft))
+                                                    lastInkDraftWrite=now
+                                                }
+                                            }
+                                        },
+                                        onSmartTap = { imagePoint ->
+                                            if(leafPage==page) scope.launch {
+                                                val requestEpoch=smartTapEpoch.incrementAndGet()
+                                                val originalPage=leafPage
+                                                val originalVariant=variant
+                                                val originalEnvironment=smartEnvironment
+                                                val tappedBitmap=bitmap ?: return@launch
+                                                val originalColor=inkColor
+                                                notice="Определяю строки и границы аята…"
+                                                val selected=withContext(Dispatchers.Default) {
+                                                    runCatching { Q7HSmartAyahV10.select(context.applicationContext,
+                                                        mushaf,originalVariant,tappedBitmap,originalPage,
+                                                        imagePoint.x,imagePoint.y,originalColor) }.getOrNull()
+                                                }
+                                                if (smartTapEpoch.get()!=requestEpoch ||
+                                                    liveSmartEnvironment.value !== originalEnvironment ||
+                                                    !liveSmartEditing.value ||
+                                                    liveSmartPage.value!=originalPage ||
+                                                    liveSmartVariant.value!=originalVariant) return@launch
+                                                if(selected==null) notice="Не удалось надёжно определить аят на этой странице"
+                                                else {
+                                                    if (smartTapEpoch.get()!=requestEpoch ||
+                                                        liveSmartEnvironment.value !== originalEnvironment ||
+                                                        !liveSmartEditing.value ||
+                                                        liveSmartPage.value!=originalPage ||
+                                                        liveSmartVariant.value!=originalVariant) return@launch
+                                                    val markings=linkedMapOf(originalPage to selected.strokes)
+                                                    for(other in listOf(originalPage-1,originalPage+1)) {
+                                                        if(other !in 1..604) continue
+                                                        val matches=withContext(Dispatchers.IO) {
+                                                            Q7HSmartAyahV10.includes(context.applicationContext,
+                                                                other,selected.ref)
+                                                        }
+                                                        if(!matches)continue
+                                                        val otherBitmap=mushaf.load(other,originalVariant) ?: continue
+                                                        val result=withContext(Dispatchers.Default) {
+                                                            runCatching { Q7HSmartAyahV10.select(context.applicationContext,
+                                                                mushaf,originalVariant,otherBitmap,other,
+                                                                0f,0f,originalColor,selected.ref) }.getOrNull()
+                                                        }
+                                                        if(result!=null) markings[other]=result.strokes
+                                                    }
+                                                    if (smartTapEpoch.get()!=requestEpoch ||
+                                                        liveSmartEnvironment.value !== originalEnvironment ||
+                                                        !liveSmartEditing.value ||
+                                                        liveSmartPage.value!=originalPage ||
+                                                        liveSmartVariant.value!=originalVariant) return@launch
+                                                    smartUndoBefore=markings.keys.associateWith {
+                                                        strokesForPage(it).toList()
+                                                    }
+                                                    markings.forEach { (targetPage,newMarks) ->
+                                                        val list=strokesForPage(targetPage)
+                                                        if(targetPage !in inkSessionSnapshots)
+                                                            inkSessionSnapshots[targetPage]=list.toList()
+                                                        if(targetPage==page) {
+                                                            inkUndoHistory.add(list.toList())
+                                                            if(inkUndoHistory.size>30)inkUndoHistory.removeAt(0)
+                                                            inkRedoHistory.clear()
+                                                        }
+                                                        // Re-highlighting the SAME ayah replaces its
+                                                        // previous smart marks instead of stacking copies.
+                                                        // Older manually created marks are untouched.
+                                                        val newIds = newMarks.map { it.text }
+                                                            .filter { it.startsWith("smart:") }.toSet()
+                                                        if (newIds.isNotEmpty())
+                                                            list.removeAll { it.tool == "smart_marker" &&
+                                                                it.text in newIds }
+                                                        list.addAll(newMarks)
+                                                        learningDb.saveInk(targetPage,list.toList())
+                                                    }
+                                                    smartUndoAfter=markings.keys.associateWith {
+                                                        strokesForPage(it).toList()
+                                                    }
+                                                    smartRedoAfter=null;smartRedoBefore=null
+                                                    inkCheckpoint=inkStrokes.toList()
+                                                    notice="Выделен аят ${selected.ref.surah}:${selected.ref.ayah} — ${markings.size} стр. При необходимости отмените."
+                                                }
+                                            }
+                                        },
+                                        onSmartClear = { imagePoint ->
+                                            if(leafPage==page) scope.launch {
+                                                val requestEpoch=smartTapEpoch.incrementAndGet()
+                                                val originalPage=leafPage
+                                                val originalVariant=variant
+                                                val originalEnvironment=smartEnvironment
+                                                val tappedBitmap=bitmap ?: return@launch
+                                                val selected=withContext(Dispatchers.Default) {
+                                                    runCatching { Q7HSmartAyahV10.select(
+                                                        context.applicationContext,mushaf,
+                                                        originalVariant,tappedBitmap,originalPage,
+                                                        imagePoint.x,imagePoint.y,inkColor)
+                                                    }.getOrNull()
+                                                }
+                                                if(selected==null) {
+                                                    notice="Аят для удаления выделения не определён"
+                                                    return@launch
+                                                }
+                                                val ref=selected.ref
+                                                val prefix="smart:${ref.surah}:${ref.ayah}:"
+                                                val affected=mutableMapOf<Int,List<InkStroke>>()
+                                                // Preserve cross-page verse support, but never
+                                                // touch the original Quran image or other ink tools.
+                                                for(targetPage in listOf(originalPage-1,originalPage,originalPage+1)) {
+                                                    if(targetPage !in 1..604)continue
+                                                    val list=strokesForPage(targetPage)
+                                                    if(list.none { it.tool=="smart_marker" })continue
+                                                    val exactTag="$prefix$targetPage"
+                                                    val known=list.filter { it.tool=="smart_marker" && it.text==exactTag }
+                                                    // Old Stage12 builds saved strokes without their
+                                                    // text tags. Recover only geometrically matching
+                                                    // smart rectangles; other annotations are safe.
+                                                    val untagged=list.filter { it.tool=="smart_marker" && it.text.isBlank() }
+                                                    val expected = if(untagged.isNotEmpty()) {
+                                                        if(targetPage==originalPage) selected.strokes
+                                                        else {
+                                                            val otherBitmap=mushaf.load(targetPage,originalVariant)
+                                                            if(otherBitmap!=null) withContext(Dispatchers.Default) {
+                                                                runCatching { Q7HSmartAyahV10.select(
+                                                                    context.applicationContext,mushaf,
+                                                                    originalVariant,otherBitmap,targetPage,
+                                                                    0f,0f,inkColor,ref)
+                                                                }.getOrNull()?.strokes
+                                                            } ?: emptyList() else emptyList()
+                                                        }
+                                                    } else emptyList()
+                                                    fun matchesOld(old:InkStroke):Boolean = expected.any { fresh ->
+                                                        if(old.points.size<2 || fresh.points.size<2) false
+                                                        else {
+                                                            val oa=old.points.first();val ob=old.points.last()
+                                                            val fa=fresh.points.first();val fb=fresh.points.last()
+                                                            val ol=minOf(oa.x,ob.x);val or=maxOf(oa.x,ob.x)
+                                                            val fl=minOf(fa.x,fb.x);val fr=maxOf(fa.x,fb.x)
+                                                            val intersection=(minOf(or,fr)-maxOf(ol,fl)).coerceAtLeast(0f)
+                                                            intersection >= (fr-fl)*.8f &&
+                                                                kotlin.math.abs(oa.y-fa.y)<.012f
+                                                        }
+                                                    }
+                                                    val oldMatches=untagged.filter(::matchesOld)
+                                                    if(known.isNotEmpty() || oldMatches.isNotEmpty())
+                                                        affected[targetPage]=known+oldMatches
+                                                }
+                                                if(smartTapEpoch.get()!=requestEpoch ||
+                                                    liveSmartEnvironment.value !== originalEnvironment ||
+                                                    !liveSmartEditing.value ||
+                                                    liveSmartPage.value!=originalPage ||
+                                                    liveSmartVariant.value!=originalVariant) return@launch
+                                                if(affected.isEmpty()) {
+                                                    notice="У этого аята нет сохранённого умного выделения"
+                                                } else {
+                                                    smartUndoBefore=affected.keys.associateWith {
+                                                        strokesForPage(it).toList()
+                                                    }
+                                                    affected.forEach { (targetPage,entries) ->
+                                                        val list=strokesForPage(targetPage)
+                                                        if(targetPage !in inkSessionSnapshots)
+                                                            inkSessionSnapshots[targetPage]=list.toList()
+                                                        if(targetPage==page) {
+                                                            inkUndoHistory.add(list.toList())
+                                                            if(inkUndoHistory.size>30)inkUndoHistory.removeAt(0)
+                                                            inkRedoHistory.clear()
+                                                        }
+                                                        list.removeAll(entries.toSet())
+                                                        learningDb.saveInk(targetPage,list.toList())
+                                                    }
+                                                    smartUndoAfter=affected.keys.associateWith {
+                                                        strokesForPage(it).toList()
+                                                    }
+                                                    smartRedoAfter=null;smartRedoBefore=null
+                                                    inkCheckpoint=inkStrokes.toList()
+                                                    notice="Удалено умное выделение аята ${ref.surah}:${ref.ayah}"
+                                                }
+                                            }
+                                        },
                                         onChanged = {
                                             if (leafPage == page) {
                                                 val next = leafStrokes.toList()
@@ -637,27 +1093,85 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                         modifier = Modifier.fillMaxSize()
                     )
                 }
-                // Ink is now inside every pager leaf, not in a stationary global overlay.
-                if (inkEditing) {
-                    Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 46.dp)
-                        .offset(y = inkToolbarOffsetDp.dp)) {
-                        InkToolbar(tool = inkTool, onTool = { chosen ->
-                            inkTool = chosen
-                            if (chosen == "cover") inkSize = .10f
-                            if (chosen == "marker") inkSize = .04f
-                            if (chosen == "pen") inkSize = .010f
+                // Always in a measured overlay; panel and square are clamped to viewport.
+                if(inkEditing) {
+                    val bounds = q7hInkPositionBounds(
+                        inkHostSize, inkPanelSize, inkToolbarState == "square",
+                        inkDensity.density
+                    )
+                    val currentX = if (inkToolbarState == "square") inkSquareX else inkPanelX
+                    val currentY = if (inkToolbarState == "square") inkSquareY else inkPanelY
+                    Box(Modifier.align(Alignment.TopStart)
+                        .offset { IntOffset(bounds.xAt(currentX).toInt(), bounds.yAt(currentY).toInt()) }
+                        .onSizeChanged { inkPanelSize=it }) {
+                        InkToolbar(tool=inkTool,onTool={chosen ->
+                            inkTool=chosen
+                            inkSize=when(chosen) {
+                                "marker","marker_ruler","marker_single",
+                                "marker_ruler_single","smart_marker" -> .04f
+                                "cover" -> .10f
+                                "pen","pen_ruler" -> .008f
+                                else -> .010f
+                            }
+                            prefs.inkStrokeSize=inkSize
                         },
-                        color = inkColor, onColor = { inkColor = it },
-                        thickness = inkSize, onThickness = { inkSize = it },
-                        canUndo = inkUndoHistory.isNotEmpty(), canRedo = inkRedoHistory.isNotEmpty(),
-                        canClear = inkStrokes.isNotEmpty(),
-                        onVerticalDrag = { deltaDp ->
-                            val maxUp = (screenHeightDp - 270f).coerceAtLeast(0f)
-                            inkToolbarOffsetDp = (inkToolbarOffsetDp + deltaDp).coerceIn(-maxUp, 0f)
+                        color=inkColor,onColor={inkColor=it;prefs.inkSelectedColor=it},
+                        thickness=inkSize,onThickness={inkSize=it;prefs.inkStrokeSize=it},
+                        palette=inkPalette,pinnedTajweed=prefs.inkPinTajweedRow,
+                        orderedTools=prefs.inkToolOrder,
+                        smartPrefs=prefs,
+                        onCreateColor={chosen,meaning ->
+                            learningDb.addInkColor(chosen,meaning)
+                            inkPalette=learningDb.inkColors()
+                            inkColor=chosen;prefs.inkSelectedColor=chosen
                         },
-                        onDragFinished = { prefs.inkToolbarOffsetDp = inkToolbarOffsetDp },
+                        onSave={
+                            learningDb.saveInk(page,inkStrokes.toList()+listOfNotNull(inkDraft))
+                            inkDraft=null;inkEditing=false
+                            inkSessionSnapshots.clear()
+                            smartUndoBefore=null;smartUndoAfter=null
+                            smartRedoBefore=null;smartRedoAfter=null
+                        },
+                        canUndo=inkUndoHistory.isNotEmpty(),canRedo=inkRedoHistory.isNotEmpty(),
+                        canClear=inkStrokes.isNotEmpty(),
+                        state=inkToolbarState,
+                        collapsedSlider=prefs.inkCollapsedSlider,
+                        collapsedTools=prefs.inkCollapsedTools,
+                        collapsedTajweed=prefs.inkCollapsedTajweed,
+                        doubleTapSquare=prefs.inkDoubleTapSquare,
+                        longPressCompact=prefs.inkLongPressCompact,
+                        onCollapse={
+                            inkToolbarState=if(inkToolbarState=="collapsed")"expanded" else "collapsed"
+                            persistInkPosition()
+                        },
+                        onMinimize={
+                            inkToolbarState=if(inkToolbarState=="square")"expanded" else "square"
+                            // Reuse the stored floating-square coordinates on every minimize.
+                            // Do not reset the square to the bottom-right on each toggle.
+                            persistInkPosition()
+                        },
+                        onVerticalDrag={dp -> inkMove(0f,with(inkDensity){dp.dp.toPx()})},
+                        onHorizontalDrag={dp -> inkMove(with(inkDensity){dp.dp.toPx()},0f)},
+                        onDragFinished={persistInkPosition()},
+                        maxPanelHeight = if (inkHostSize.height > 0)
+                            with(inkDensity) { inkHostSize.height.toDp() - 10.dp }
+                                .coerceAtLeast(150.dp)
+                        else 440.dp,
                         onUndo = {
-                            if (inkUndoHistory.isNotEmpty()) {
+                            val before=smartUndoBefore
+                            val after=smartUndoAfter
+                            if(before!=null && after?.get(page)==inkStrokes.toList()) {
+                                before.forEach { (changedPage, marks) ->
+                                    val target=strokesForPage(changedPage)
+                                    target.clear();target.addAll(marks)
+                                    learningDb.saveInk(changedPage,marks)
+                                }
+                                if(inkUndoHistory.isNotEmpty())inkUndoHistory.removeAt(inkUndoHistory.lastIndex)
+                                inkCheckpoint=inkStrokes.toList()
+                                smartRedoBefore=before
+                                smartRedoAfter=after
+                                smartUndoBefore=null;smartUndoAfter=null
+                            } else if (inkUndoHistory.isNotEmpty()) {
                                 inkRedoHistory.add(inkStrokes.toList())
                                 val prior = inkUndoHistory.removeAt(inkUndoHistory.lastIndex)
                                 inkStrokes.clear(); inkStrokes.addAll(prior)
@@ -666,7 +1180,20 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                             }
                         },
                         onRedo = {
-                            if (inkRedoHistory.isNotEmpty()) {
+                            val redo=smartRedoAfter
+                            if(redo!=null && smartRedoBefore!=null && redo.keys.all { key ->
+                                strokesForPage(key).toList()==smartRedoBefore?.get(key)
+                            }) {
+                                smartUndoBefore=redo.keys.associateWith { strokesForPage(it).toList() }
+                                inkUndoHistory.add(inkStrokes.toList())
+                                redo.forEach { (changedPage, marks) ->
+                                    val target=strokesForPage(changedPage)
+                                    target.clear();target.addAll(marks)
+                                    learningDb.saveInk(changedPage,marks)
+                                }
+                                inkCheckpoint=inkStrokes.toList()
+                                smartUndoAfter=redo;smartRedoAfter=null;smartRedoBefore=null
+                            } else if (inkRedoHistory.isNotEmpty()) {
                                 inkUndoHistory.add(inkStrokes.toList())
                                 val redo = inkRedoHistory.removeAt(inkRedoHistory.lastIndex)
                                 inkStrokes.clear(); inkStrokes.addAll(redo)
@@ -677,107 +1204,115 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                     }
                 }
 
-                AnimatedVisibility(
-                    visible = (controlsVisible && !controlsLocked) || inkEditing,
+                if (!inkEditing) AnimatedVisibility(
+                    visible = controlsVisible && !controlsLocked,
                     enter = fadeIn(), exit = fadeOut(),
-                    modifier = Modifier.align(Alignment.TopEnd).padding(top = 7.dp, end = 7.dp)
+                    modifier = Modifier.fillMaxSize()
                 ) {
-                    Surface(
-                        color = if (dark) Color.Black.copy(alpha = 0.68f)
-                            else Color.White.copy(alpha = 0.90f),
-                        contentColor = if (dark) Color.White else Color(0xFF172024),
-                        shape = RoundedCornerShape(22.dp),
-                        shadowElevation = 2.dp
-                    ) {
-                        // Seven actions, in right-to-left order, all on the ONE top toolbar.
-                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(onClick = {
-                                    drawerTab = DrawerSection.CONTENTS
-                                    scope.launch { drawerState.open() }
-                                }) {
-                                    Icon(Icons.Default.FormatListBulleted, "Содержание")
-                                }
-                                IconButton(onClick = { changeAppearance(nextMode = if (dark) "light" else "dark") }) {
-                                    Icon(if (dark) Icons.Default.LightMode else Icons.Default.DarkMode, "Сменить тему")
-                                }
-                                IconButton(onClick = {
-                                    showInk = !showInk
-                                    prefs.inkVisible = showInk
-                                    if (!showInk) inkEditing = false
-                                }) {
-                                    Icon(if (showInk) Icons.Default.Layers else Icons.Default.LayersClear,
-                                        if (showInk) "Чистая страница" else "Показать пометки")
-                                }
-                                Box {
-                                    IconButton(onClick = { bookmarkMenu = true }) {
-                                        val saved = bookmarks.firstOrNull { it.page == page }
-                                        if (saved != null) LearningBookmarkIcon(
-                                            icon = saved.type.icon, tint = Color(saved.type.color.toInt()),
-                                            modifier = Modifier.size(24.dp))
-                                        else Icon(Icons.Default.BookmarkBorder, "Закладка")
-                                    }
-                                    LearningBookmarkMenu(
-                                        expanded = bookmarkMenu, page = page,
-                                        types = bookmarkTypes, bookmarks = bookmarks,
-                                        onDismiss = { bookmarkMenu = false },
-                                        onToggle = { type ->
-                                            val current = bookmarks.firstOrNull { it.page == page && it.typeId == type.id }
-                                            if (current != null) {
-                                                learningNotes.filter { it.bookmarkId == current.id }.forEach { note ->
-                                                    learningDb.saveNote(note.copy(
-                                                        bookmarkId = null,
-                                                        scope = if(note.scope == NoteScope.NONE) NoteScope.PAGE else note.scope,
-                                                        number = if(note.scope == NoteScope.NONE) current.page else note.number
-                                                    ))
-                                                }
-                                                learningDb.removeBookmark(current.id)
-                                            } else learningDb.addBookmark(page, type.id)
-                                            bookmarks = learningDb.bookmarks()
-                                            learningNotes = learningDb.notes()
-                                            bookmarkMenu = false
-                                        },
-                                        onEdit = { typeEditor = it; bookmarkMenu = false },
-                                        onCreate = { newTypeEditor = true; bookmarkMenu = false },
-                                        onRemove = {
-                                            // Remove all bookmarks attached to the CURRENT page;
-                                            // bookmarks elsewhere and notes are left untouched.
-                                            bookmarks.filter { it.page == page }.forEach { mark ->
-                                                learningNotes.filter { it.bookmarkId == mark.id }.forEach { note ->
-                                                    learningDb.saveNote(note.copy(
-                                                        bookmarkId = null,
-                                                        scope = if(note.scope == NoteScope.NONE) NoteScope.PAGE else note.scope,
-                                                        number = if(note.scope == NoteScope.NONE) mark.page else note.number
-                                                    ))
-                                                }
-                                                learningDb.removeBookmark(mark.id)
-                                            }
-                                            bookmarks = learningDb.bookmarks()
-                                            learningNotes = learningDb.notes()
-                                            bookmarkMenu = false
-                                        }
-                                    )
-                                }
-                                IconButton(onClick = { changeAppearance(nextTajweed = !tajweed) }) {
-                                    Icon(if (tajweed) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                        if (tajweed) "Отключить таджвид" else "Включить таджвид")
-                                }
-                                IconButton(onClick = { showToolbarPageJump = true }) {
-                                    Icon(Icons.Default.FindInPage, "Перейти")
-                                }
-                                IconButton(onClick = {
-                                    inkEditing = !inkEditing
-                                    if (inkEditing) { showInk = true; prefs.inkVisible = true }
-                                }) {
-                                    Icon(if (inkEditing) Icons.Default.Check else Icons.Default.Edit,
-                                        if (inkEditing) "Завершить пометки" else "Рисовать на странице")
-                                }
+                    val actionSlot: @Composable (String) -> Unit = { key ->
+                        when(key) {
+                            "panel" -> IconButton(onClick = { switchSheet(preferredSheet) }) {
+                                Icon(Icons.Default.KeyboardArrowUp,"Открыть панель")
                             }
+                            "contents" -> IconButton(onClick = {
+                                drawerTab=DrawerSection.CONTENTS
+                                scope.launch { drawerState.open() }
+                            }) { Icon(Icons.Default.FormatListBulleted,"Содержание") }
+                            "theme" -> IconButton(onClick = {
+                                changeAppearance(nextMode=if(dark) "light" else "dark")
+                            }) { Icon(if(dark) Icons.Default.LightMode else Icons.Default.DarkMode,"Сменить тему") }
+                            "layers" -> IconButton(onClick = {
+                                showInk=!showInk
+                                prefs.inkVisible=showInk
+                                if(!showInk) inkEditing=false
+                            }) { Icon(if(showInk) Icons.Default.Layers else Icons.Default.LayersClear,
+                                if(showInk) "Чистая страница" else "Показать пометки") }
+                            "bookmark" -> {
+                    Box {
+                        IconButton(onClick = { bookmarkMenu = true }) {
+                            val saved = bookmarks.firstOrNull { it.page == page }
+                            if (saved != null) LearningBookmarkIcon(
+                                icon = saved.type.icon, tint = Color(saved.type.color.toInt()),
+                                modifier = Modifier.size(24.dp))
+                            else Icon(Icons.Default.BookmarkBorder, "Закладка")
+                        }
+                        LearningBookmarkMenu(
+                            expanded = bookmarkMenu, page = page,
+                            types = if(bookmarkMenu) learningDb.types() else bookmarkTypes,
+                            bookmarks = bookmarks,
+                            onDismiss = { bookmarkMenu = false },
+                            onToggle = { type ->
+                                val current = bookmarks.firstOrNull { it.page == page && it.typeId == type.id }
+                                if (current != null) {
+                                    learningNotes.filter { it.bookmarkId == current.id }.forEach { note ->
+                                        learningDb.saveNote(note.copy(
+                                            bookmarkId = null,
+                                            scope = if(note.scope == NoteScope.NONE) NoteScope.PAGE else note.scope,
+                                            number = if(note.scope == NoteScope.NONE) current.page else note.number
+                                        ))
+                                    }
+                                    learningDb.removeBookmark(current.id)
+                                } else learningDb.addBookmark(page, type.id)
+                                bookmarks = learningDb.bookmarks()
+                                learningNotes = learningDb.notes()
+                                bookmarkMenu = false
+                            },
+                            onEdit = { typeEditor = it; bookmarkMenu = false },
+                            onCreate = { newTypeEditor = true; bookmarkMenu = false },
+                            onRemove = {
+                                // Remove all bookmarks attached to the CURRENT page;
+                                // bookmarks elsewhere and notes are left untouched.
+                                bookmarks.filter { it.page == page }.forEach { mark ->
+                                    learningNotes.filter { it.bookmarkId == mark.id }.forEach { note ->
+                                        learningDb.saveNote(note.copy(
+                                            bookmarkId = null,
+                                            scope = if(note.scope == NoteScope.NONE) NoteScope.PAGE else note.scope,
+                                            number = if(note.scope == NoteScope.NONE) mark.page else note.number
+                                        ))
+                                    }
+                                    learningDb.removeBookmark(mark.id)
+                                }
+                                bookmarks = learningDb.bookmarks()
+                                learningNotes = learningDb.notes()
+                                bookmarkMenu = false
+                            }
+                        )
+                    }
+                            }
+                            "tajweed" -> IconButton(onClick={changeAppearance(nextTajweed=!tajweed)}) {
+                                Icon(if(tajweed) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                    if(tajweed) "Отключить таджвид" else "Включить таджвид")
+                            }
+                            "goto" -> IconButton(onClick={showToolbarPageJump=true}) {
+                                Icon(Icons.Default.FindInPage,"Перейти")
+                            }
+                            "draw" -> IconButton(onClick={
+                                if(!inkEditing) {
+                                    inkSessionBaseline=inkStrokes.toList()
+                                    inkSessionSnapshots.clear()
+                                    inkSessionSnapshots[page]=inkSessionBaseline
+                                    smartUndoBefore=null;smartUndoAfter=null
+                                    smartRedoBefore=null;smartRedoAfter=null
+                                    inkEditing=true
+                                    showInk=true; prefs.inkVisible=true
+                                } else {
+                                    learningDb.saveInk(page,inkStrokes.toList()+listOfNotNull(inkDraft))
+                                    inkDraft=null;inkEditing=false
+                                    inkSessionSnapshots.clear()
+                                    smartUndoBefore=null;smartUndoAfter=null
+                                    smartRedoBefore=null;smartRedoAfter=null
+                                }
+                            }) { Icon(if(inkEditing) Icons.Default.Check else Icons.Default.Edit,
+                                if(inkEditing) "Завершить пометки" else "Рисовать на странице") }
                         }
                     }
+                    Q7HFloatingMushafToolbar(
+                        bottomEnabled=bottomNavigation, inkEditing=inkEditing,
+                        readerDark=dark, action=actionSlot
+                    )
                 }
                 AnimatedVisibility(
-                    visible = controlsVisible && !controlsLocked,
+                    visible = !bottomNavigation && controlsVisible && !controlsLocked && !inkEditing,
                     enter = fadeIn(), exit = fadeOut(),
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp)
                 ) {
@@ -818,28 +1353,12 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                 }
             }
         }
-        if (showToolbarPageJump) {
-            PageJumpDialog(
-                initialPage = page,
-                descriptions = catalogDetails,
-                onDismiss = { showToolbarPageJump = false },
-                onGo = { target ->
-                    showToolbarPageJump = false
-                    goToPage(target)
-                    controlsVisible = false
-                },
-                onGoAyah = { surah, ayah ->
-                    showToolbarPageJump = false
-                    goToAyah(surah, ayah)
-                }
-            )
-        }
         if (typeEditor != null || newTypeEditor) {
             val existing = typeEditor
             BookmarkTypeEditor(initial = existing,
                 onDismiss = { typeEditor = null; newTypeEditor = false },
-                onSave = { name, purpose, color ->
-                    learningDb.saveType(existing?.id, name, purpose, color)
+                onSave = { name, purpose, color, icon ->
+                    learningDb.saveType(existing?.id, name, purpose, color, icon)
                     bookmarkTypes = learningDb.types()
                     bookmarks = learningDb.bookmarks()
                     typeEditor = null; newTypeEditor = false
@@ -887,31 +1406,40 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.End
                 ) {
-                    IconButton(onClick = { sheet = null }) {
-                        Icon(Icons.Default.Close, "Закрыть панель")
+                    if(!bottomNavigation && Q7HReaderOptions.topClose) {
+                        IconButton(onClick = { sheet = null }) {
+                            Icon(Icons.Default.Close, "Закрыть панель")
+                        }
                     }
                 }
             }
         ) {
             Column(Modifier.fillMaxWidth().fillMaxHeight(0.93f)) {
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                    SingleChoiceSegmentedButtonRow(
-                        Modifier.width((visibleSections.size * 134).dp).padding(horizontal = 8.dp, vertical = 5.dp)
-                    ) {
-                        visibleSections.forEachIndexed { index, (target, title) ->
-                                SegmentedButton(selected = sheet == target, onClick = {
-                                    preferredSheet = target
-                                    prefs.lastSheetSection = target.name
-                                    sheet = target
-                                }, shape = SegmentedButtonDefaults.itemShape(index, visibleSections.size)) {
-                                    Text(title, maxLines = 1, fontSize = 12.sp)
+                if (!bottomNavigation) {
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                        SingleChoiceSegmentedButtonRow(
+                            Modifier.width((visibleSections.size * 134).dp).padding(horizontal = 8.dp, vertical = 5.dp)
+                        ) {
+                            visibleSections.forEachIndexed { index, (target, title) ->
+                                    SegmentedButton(selected = sheet == target, onClick = {
+                                        preferredSheet = target
+                                        prefs.lastSheetSection = target.name
+                                        sheet = target
+                                    }, shape = SegmentedButtonDefaults.itemShape(index, visibleSections.size)) {
+                                        Text(title, maxLines = 1, fontSize = 12.sp)
+                                    }
                                 }
-                            }
+                        }
                     }
+                    HorizontalDivider()
                 }
-                HorizontalDivider()
+                // Sheet content consumes remaining space; the dock sits BELOW audio mini players.
+                Box(Modifier.weight(1f).fillMaxWidth()) {
                 when (sheet) {
                     SheetSection.AUDIO -> AudioPanel(
+                        bottomNavEnabled = bottomNavigation,
+                        rangeRequest = if(bottomRangeSection==SheetSection.AUDIO) bottomRangeSerial else 0,
+                        onRangeRequestConsumed = { bottomRangeSerial = 0 },
                         category = audioSegment,
                         onCategory = { selected ->
                             audioSegment = selected
@@ -968,6 +1496,9 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                         }
                     )
                     SheetSection.TAFSIR -> TafsirPanel(
+                        bottomNavEnabled = bottomNavigation,
+                        rangeRequest = if(bottomRangeSection==SheetSection.TAFSIR) bottomRangeSerial else 0,
+                        onRangeRequestConsumed = { bottomRangeSerial = 0 },
                         prefs = prefs,
                         page = page, store = tafsir,
                         quranScript = quranScript, tajweed = tajweed,
@@ -998,12 +1529,18 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                 it.scope == NoteScope.AYAH && it.surah == s && it.firstAyah == a
                             } ?: LearningNote(scope = NoteScope.AYAH, surah = s, firstAyah = a, lastAyah = a)
                         },
+                        onQuoteAyah=::quoteIntoNote,
+                        database=learningDb,
+                        jumpToAyah=Q7HAyahJumpBus.pending,
+                        onNavigate={showToolbarPageJump=true},
+                        onPanelClose={sheet=null},
+                        onPanelSection=::switchSheet,
                         onPlayRange = { fromSurah, fromAyah, toSurah, toAyah, mode ->
                             val intendedReciter = if (mode == AyahEndMode.ALL_RECITERS) {
                                 reciters.firstOrNull { it.repository == prefs.manuallySelectedReciter }
                                     ?: reciters.firstOrNull {
                                         it.repository.removePrefix("q7h_").lowercase() in
-                                            setOf("aymansowaid","aymansuwaid")
+                                            setOf("shatri","abubakrshatri","abubakrashshaatree")
                                     } ?: reciters.firstOrNull()
                             } else {
                                 reciters.firstOrNull { it.repository == selectedReciter }
@@ -1014,6 +1551,7 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                             } else {
                                 ayahMode = mode
                                 prefs.ayahEndMode = mode.name
+                                Q7HRangeOverlay.start(SheetSection.TAFSIR)
                                 ayahConnection.playAyahRange(intendedReciter,fromSurah,fromAyah,
                                     toSurah,toAyah,mode)
                             }
@@ -1038,34 +1576,59 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                         onNext = { goToPage(page + 1) }
                     )
                     SheetSection.HAFIZ -> HafizDiaryPanelEnhanced(
+                        bottomNavEnabled = bottomNavigation,
+                        rangeRequest = if(bottomRangeSection==SheetSection.HAFIZ) bottomRangeSerial else 0,
+                        onRangeRequestConsumed = { bottomRangeSerial = 0 },
                         page = page, tafsir = tafsir, prefs = prefs, db = learningDb,
                         tajweed = tajweed,wordStore=wordStore,
-                        playback=ayahSnapshot, controller=ayahController,
+                        playback=diarySnapshot, controller=diaryController,
                         reciters=reciters,reciterError=reciterError,
                         selectedReciter=selectedReciter,
                         onReciter={ chosen ->
                             selectedReciter=chosen
                             prefs.selectedReciter=chosen
-                            if(ayahSnapshot.playing && ayahSnapshot.mediaId.startsWith("ayah:")) {
-                                val parts=ayahSnapshot.mediaId.split(':')
+                            if(diarySnapshot.playing && diarySnapshot.mediaId.startsWith("ayah:")) {
+                                val parts=diarySnapshot.mediaId.split(':')
                                 val reciter=reciters.firstOrNull { it.repository==chosen }
                                 if(parts.size>=3 && reciter!=null) {
                                     val s=parts[1].toIntOrNull()
                                     val a=parts[2].toIntOrNull()
-                                    if(s!=null && a!=null) ayahConnection.playAyah(reciter,s,a,ayahMode)
+                                    if(s!=null && a!=null) diaryConnection.playAyah(reciter,s,a,diaryMode)
                                 }
                             }
                         },
-                        endMode=ayahMode,onEndMode={ next ->
-                            ayahMode=next
-                            prefs.ayahEndMode=next.name
-                            ayahConnection.setAyahEndMode(next)
+                        endMode=diaryMode,onEndMode={ next ->
+                            if(separateHafiz) {
+                                hafizMode=next; prefs.hafizEndMode=next.name
+                            } else {
+                                ayahMode=next; prefs.ayahEndMode=next.name
+                            }
+                            diaryConnection.setAyahEndMode(next)
                         },
-                        onPlayVerse=::playVerse,
+                        onPlayVerse=::playDiaryVerse,
                         onNoteAyah = { s, a ->
                             noteEditor = learningNotes.firstOrNull {
                                 it.scope == NoteScope.AYAH && it.surah == s && it.firstAyah == a
                             } ?: LearningNote(scope = NoteScope.AYAH, surah = s, firstAyah = a, lastAyah = a)
+                        },
+                        onQuoteAyah=::quoteIntoNote,
+                        jumpToAyah=Q7HAyahJumpBus.pending,
+                        onNavigate={showToolbarPageJump=true},
+                        onPanelClose={sheet=null},
+                        onPanelSection=::switchSheet,
+                        onPlayRange={ fromS,fromA,toS,toA,mode ->
+                            val reciter=reciters.firstOrNull { it.repository==selectedReciter }
+                            if(reciter == null || diaryController == null) {
+                                notice="Плеер Дневника хафиза или чтецы не загружены"
+                            } else {
+                                Q7HRangeOverlay.start(SheetSection.HAFIZ)
+                                if(separateHafiz) {
+                                    hafizMode=mode; prefs.hafizEndMode=mode.name
+                                } else {
+                                    ayahMode=mode; prefs.ayahEndMode=mode.name
+                                }
+                                diaryConnection.playAyahRange(reciter,fromS,fromA,toS,toA,mode)
+                            }
                         },
                         onPrevious = { goToPage(page - 1) },
                         onNext = { goToPage(page + 1) }
@@ -1078,11 +1641,54 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                         tajweed = tajweed, setTajweed = { changeAppearance(nextTajweed = it) },
                         autoFlip = autoFlip, setAutoFlip = { autoFlip = it; prefs.autoFlip = it },
                         keepAwake = keepAwake, setKeepAwake = { keepAwake = it; prefs.keepAwake = it },
+                        separateHafiz=separateHafiz, setSeparateHafiz={ enabled ->
+                            // Stop the previous channel when changing routing, not the other player's state.
+                            if(enabled!=separateHafiz) {
+                                Q7HRangeOverlay.close(context,
+                                    if(separateHafiz) AudioChannel.HAFIZ else AudioChannel.AYAH,
+                                    if(separateHafiz) hafizController else ayahController)
+                                separateHafiz=enabled
+                                prefs.separateHafizPlayer=enabled
+                            }
+                        },
                         mushaf = mushaf
                     )
                     null -> Unit
                 }
+                }
+                if (bottomNavigation) Q7HBottomSheetDock(
+                    section = sheet ?: SheetSection.AUDIO,
+                    onSection = ::switchSheet,
+                    onClose = { bottomRangeSerial = 0; sheet = null },
+                    page = page,
+                    onPrevious = { goToPage(page - 1) },
+                    onNext = { goToPage(page + 1) },
+                    onNavigate = { showToolbarPageJump = true },
+                    audioCategory = audioSegment,
+                    onAudioCategory = { selected ->
+                        audioSegment = selected
+                        prefs.lastAudioSegment = selected.name
+                    },
+                    onRange = { sheet?.let(::requestBottomRange) },
+                    readerDark = dark
+                )
             }
+        }
+        if (showToolbarPageJump) {
+            PageJumpDialog(
+                initialPage = page,
+                descriptions = catalogDetails,
+                onDismiss = { showToolbarPageJump = false },
+                onGo = { target ->
+                    showToolbarPageJump = false
+                    goToPage(target)
+                    controlsVisible = false
+                },
+                onGoAyah = { surah, ayah ->
+                    showToolbarPageJump = false
+                    goToAyah(surah, ayah)
+                }
+            )
         }
     }
 }
