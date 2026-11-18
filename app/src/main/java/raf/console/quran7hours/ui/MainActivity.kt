@@ -30,6 +30,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -92,6 +95,7 @@ class MainActivity : ComponentActivity() {
 
 enum class SheetSection { AUDIO, TAFSIR, HAFIZ, SETTINGS }
 private enum class DrawerSection { CONTENTS, BOOKMARKS, NOTES }
+private data class Q7HReaderSelectedAyah(val surah: Int, val ayah: Int, val page: Int)
 
 /**
  * Normalized positions are stored in SharedPreferences (and included in user backups).
@@ -164,7 +168,7 @@ private fun snapshot(player: MediaController?): PlaybackSnapshot = if (player ==
         }
     )
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.media3.common.util.UnstableApi::class)
 @Composable
 private fun Quran7HoursScreen(activity: MainActivity) {
     val context = LocalContext.current
@@ -176,6 +180,7 @@ private fun Quran7HoursScreen(activity: MainActivity) {
     val tafsir = remember { TafsirStore(context) }
     val quranScript = remember { TafsirQuranScript(context) }
     val wordStore = remember { WordByWordStore(context) }
+    val reciterRepository = remember(context.applicationContext) { ReciterRepository(context.applicationContext) }
     val timings = remember { TimingCatalog(context) }
     val hadrConnection = remember { AudioConnection(context, AudioChannel.HADR) }
     val ayahConnection = remember { AudioConnection(context, AudioChannel.AYAH) }
@@ -190,7 +195,8 @@ private fun Quran7HoursScreen(activity: MainActivity) {
     var separateHafiz by remember { mutableStateOf(prefs.separateHafizPlayer) }
     var hafizMode by remember { mutableStateOf(AyahEndMode.entries.firstOrNull {
         it.name == prefs.hafizEndMode } ?: AyahEndMode.STOP) }
-    var reciters by remember { mutableStateOf<List<Reciter>>(emptyList()) }
+    // Persisted catalog is available immediately; GitHub is only a background refresh.
+    var reciters by remember { mutableStateOf(reciterRepository.cached()) }
     var reciterError by remember { mutableStateOf("") }
     var recitersRequested by remember { mutableStateOf(false) }
     var selectedReciter by remember { mutableStateOf(prefs.selectedReciter) }
@@ -229,6 +235,11 @@ private fun Quran7HoursScreen(activity: MainActivity) {
     var newTypeEditor by remember { mutableStateOf(false) }
     var noteEditor by remember { mutableStateOf<LearningNote?>(null) }
     var inkEditing by remember { mutableStateOf(false) }
+    // Contextual ayah actions are available directly on the Mushaf page.
+    var readerAyah by remember { mutableStateOf<Q7HReaderSelectedAyah?>(null) }
+    var readerAudioAyah by remember { mutableStateOf<Q7HReaderSelectedAyah?>(null) }
+    var pendingReaderAudio by remember { mutableStateOf<Q7HReaderSelectedAyah?>(null) }
+    var readerEraser by remember { mutableStateOf(false) }
     var showInk by remember { mutableStateOf(prefs.inkVisible) }
     var inkTool by remember { mutableStateOf(prefs.inkDefaultTool) }
     var inkColor by remember { mutableLongStateOf(prefs.inkSelectedColor) }
@@ -292,6 +303,11 @@ private fun Quran7HoursScreen(activity: MainActivity) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val pager = rememberPagerState(initialPage = prefs.lastPage - 1, pageCount = { QuranCatalog.TOTAL_PAGES })
     val page = pager.currentPage + 1
+    LaunchedEffect(page) {
+        readerAyah = null
+        readerEraser = false
+        pendingReaderAudio = null
+    }
     Q7HReaderOptions.load(context)
     Q7HBottomNavSettings.load(context)
     val bottomNavigation = Q7HBottomNavSettings.enabled
@@ -406,7 +422,6 @@ private fun Quran7HoursScreen(activity: MainActivity) {
     // different page or theme after the reader turns pages / changes theme.
     val liveSmartPage = rememberUpdatedState(page)
     val liveSmartVariant = rememberUpdatedState(variant)
-    val liveSmartEditing = rememberUpdatedState(inkEditing)
     // Any transition away and back invalidates pending async selection results.
     val smartEnvironment = remember(page, variant, inkEditing) { Any() }
     val liveSmartEnvironment = rememberUpdatedState(smartEnvironment)
@@ -453,40 +468,81 @@ private fun Quran7HoursScreen(activity: MainActivity) {
             delay(300)
         }
     }
-    // Load the HTTPS-only reciter list only while Tafsir is visible. A cancelled request
-    // (the user closes the sheet) can be retried upon reopening.
-    LaunchedEffect(sheet) {
-        if ((sheet != SheetSection.TAFSIR && sheet != SheetSection.HAFIZ) ||
-            recitersRequested || reciters.isNotEmpty()) return@LaunchedEffect
-        recitersRequested = true
-        try {
-            ReciterRepository().list().fold(
-                onSuccess = { list ->
-                    reciters = list
-                    reciterError = if (list.size == 43) "" else "Получено ${list.size} репозиториев вместо 43"
-                    if(list.isNotEmpty()) {
-                        val shatri=list.firstOrNull {
-                            it.repository.removePrefix("q7h_").lowercase() in
-                                setOf("shatri","abubakrshatri","abubakrashshaatree")
-                        } ?: list.first()
-                        val suwaidAlias=selectedReciter.removePrefix("q7h_").lowercase() in
-                            setOf("aymansowaid","aymansuwaid")
-                        val manual=prefs.manuallySelectedReciter
-                        val desired=when {
-                            manual.isNotBlank() && list.any { it.repository==manual } -> manual
-                            selectedReciter.isBlank() || suwaidAlias || list.none { it.repository==selectedReciter } -> shatri.repository
-                            else -> selectedReciter
-                        }
-                        selectedReciter=desired
-                        if(prefs.selectedReciter!=desired) prefs.selectedReciter=desired
-                    }
+    // Stale-while-revalidate: NEVER wait for GitHub before enabling Play.
+    // Existing installations already have the last 43 validated reciters in
+    // ayah_reciter_order, which PERSON mode also reads directly.
+    LaunchedEffect(Unit) {
+        fun applyCatalog(list: List<Reciter>) {
+            if (list.isEmpty()) return
+            reciters = list
+            reciterError = ""
+            val shatri = list.firstOrNull {
+                it.repository.removePrefix("q7h_").lowercase() in
+                    setOf("shatri", "abubakrshatri", "abubakrashshaatree")
+            } ?: list.first()
+            val oldSuwaid = selectedReciter.removePrefix("q7h_").lowercase() in
+                setOf("aymansowaid", "aymansuwaid")
+            val manuallySelected = prefs.manuallySelectedReciter
+            val desired = when {
+                manuallySelected.isNotBlank() && list.any { it.repository == manuallySelected } ->
+                    manuallySelected
+                selectedReciter.isBlank() || oldSuwaid ||
+                    list.none { it.repository == selectedReciter } -> shatri.repository
+                else -> selectedReciter
+            }
+            selectedReciter = desired
+            if (prefs.selectedReciter != desired) prefs.selectedReciter = desired
+        }
+        applyCatalog(reciterRepository.cached())
+        if (reciterRepository.refreshNeeded()) {
+            recitersRequested = true
+            reciterRepository.list().fold(
+                onSuccess = { refreshed ->
+                    // A transient API failure may return cached data. Never shrink
+                    // the list shown in the reader / Tafsir / Hafiz UI.
+                    if (refreshed.size >= reciters.size) applyCatalog(refreshed)
                 },
-                onFailure = { reciterError = it.localizedMessage ?: "Ошибка загрузки чтецов" }
+                onFailure = { error ->
+                    if (reciters.isEmpty())
+                        reciterError = error.localizedMessage ?: "Нет доступного каталога чтецов"
+                    else Log.w("Q7H-Reciters", "Using cached voices", error)
+                }
             )
-        } finally {
-            if (reciters.isEmpty()) recitersRequested = false
+            recitersRequested = false
         }
     }
+
+    // Priority: 1) current physical page; 2) next page; 3) previous page.
+    // All verses on these pages are scheduled (not just the first eight).
+    // No player.prepare(), currentMediaItem change, or auto-play is performed.
+    // Compose cancels an old page-window request when the reader turns pages.
+    LaunchedEffect(page, selectedReciter, reciters) {
+        val reciter = reciters.firstOrNull { it.repository == selectedReciter }
+            ?: return@LaunchedEffect
+        val window = withContext(Dispatchers.IO) {
+            val here = tafsir.page(page).map { it.surah to it.ayah }
+            val next = if (page < QuranCatalog.TOTAL_PAGES)
+                tafsir.page(page + 1).map { it.surah to it.ayah } else emptyList()
+            val previous = if (page > 1)
+                tafsir.page(page - 1).map { it.surah to it.ayah } else emptyList()
+            Triple(here, next, previous)
+        }
+        Q7HAyahStreamCache.warmWindow(
+            reciter, window.first, window.second, window.third, context.applicationContext
+        )
+    }
+
+    // Double-tapping an arbitrary verse prefetches THAT exact verse separately,
+    // even when many neighbouring page verses are still queued for download.
+    LaunchedEffect(readerAyah, selectedReciter) {
+        val chosen = readerAyah ?: return@LaunchedEffect
+        val reciter = reciters.firstOrNull { it.repository == selectedReciter }
+            ?: return@LaunchedEffect
+        Q7HAyahStreamCache.warmSelected(
+            reciter, chosen.surah, chosen.ayah, context.applicationContext
+        )
+    }
+
     LaunchedEffect(keepAwake) {
         if (keepAwake) activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         else activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -613,6 +669,30 @@ private fun Quran7HoursScreen(activity: MainActivity) {
             }
         }
     }
+    // A single source of truth for the Tafsir and Mushaf ayah player.
+    // The same selected reader and STOP/NEXT/REPEAT/N/PERSON mode are used
+    // by both surfaces; changing them in either place is immediately persisted.
+    fun selectAyahReciter(chosen: String) {
+        selectedReciter = chosen
+        prefs.selectedReciter = chosen
+        if (ayahSnapshot.playing && ayahSnapshot.mediaId.startsWith("ayah:")) {
+            val parts = ayahSnapshot.mediaId.split(':')
+            val reciter = reciters.firstOrNull { it.repository == chosen }
+            val surah = parts.getOrNull(1)?.toIntOrNull()
+            val verse = parts.getOrNull(2)?.toIntOrNull()
+            if (reciter != null && surah != null && verse != null &&
+                QuranCatalog.isValidAyah(surah, verse)) {
+                // Preserve the current verse when switching readers, just as in Tafsir.
+                ayahConnection.playAyah(reciter, surah, verse, ayahMode)
+            }
+        }
+    }
+    fun selectAyahMode(mode: AyahEndMode) {
+        ayahMode = mode
+        prefs.ayahEndMode = mode.name
+        ayahConnection.setAyahEndMode(mode)
+    }
+
     fun playVerse(surah: Int, verse: Int) {
         val reciter = reciters.firstOrNull { it.repository == selectedReciter }
         if (reciter == null) { notice = "Выберите чтеца, проверьте подключение к сети"; return }
@@ -622,9 +702,47 @@ private fun Quran7HoursScreen(activity: MainActivity) {
             if (ayahSnapshot.playing) ayahController?.pause()
             else {
                 if (ayahSnapshot.ended) ayahController?.seekTo(0L)
+                if (ayahController?.playbackState == Player.STATE_IDLE) ayahController?.prepare()
                 ayahController?.play()
             }
         } else ayahConnection.playAyah(reciter, surah, verse, ayahMode)
+    }
+
+    fun playReaderVerse(surah: Int, verse: Int) {
+        val displayed = readerAudioAyah ?: readerAyah
+        readerAudioAyah = Q7HReaderSelectedAyah(surah, verse, displayed?.page ?: page)
+        if (reciters.isEmpty() || ayahController == null) {
+            pendingReaderAudio = readerAudioAyah
+            // Keep the play request pending without a persistent blocking banner.
+        } else {
+            pendingReaderAudio = null
+            playVerse(surah, verse)
+        }
+    }
+
+    // Reflect Media3 automatic NEXT and PERSON transitions in the Mushaf mini-player.
+    // The reader sheet is not opened and the Quran page is not turned by this effect.
+    LaunchedEffect(ayahSnapshot.mediaId) {
+        val parts = ayahSnapshot.mediaId.split(':')
+        val current = readerAudioAyah
+        if (current != null && parts.firstOrNull() == "ayah") {
+            val surah = parts.getOrNull(1)?.toIntOrNull()
+            val verse = parts.getOrNull(2)?.toIntOrNull()
+            if (surah != null && verse != null && QuranCatalog.isValidAyah(surah, verse) &&
+                (surah != current.surah || verse != current.ayah)) {
+                readerAudioAyah = current.copy(surah = surah, ayah = verse)
+            }
+        }
+    }
+
+    // If a reader chooses Play before the online reciter catalog is ready,
+    // start that exact ayah automatically once both Media3 and the catalog arrive.
+    LaunchedEffect(reciters, ayahController, pendingReaderAudio) {
+        val wanted=pendingReaderAudio
+        if(wanted!=null && reciters.isNotEmpty() && ayahController!=null) {
+            pendingReaderAudio=null
+            playVerse(wanted.surah,wanted.ayah)
+        }
     }
 
     fun playDiaryVerse(surah: Int, verse: Int) {
@@ -830,19 +948,13 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                 .background(canvasColor)
                                 // Tap: toggle controls; long press: lock/unlock the controls.
                                 // Horizontal drags are left to the pager (real RTL).
-                                .pointerInput(controlsVisible, controlsLocked) {
-                                    detectTapGestures(
-                                        onTap = { if (!controlsLocked) controlsVisible = !controlsVisible },
-                                        onLongPress = {
-                                            if (controlsLocked) {
-                                                controlsLocked = false
-                                                controlsVisible = true
-                                            } else {
-                                                controlsVisible = false
-                                                controlsLocked = true
-                                            }
-                                        }
-                                    )
+                                .pointerInput(showInk, inkEditing) {
+                                    // Without visible annotations there is no ink layer
+                                    // receiving taps, so keep the one-tap toolbar gesture.
+                                    if(!showInk) detectTapGestures(onTap={
+                                        controlsLocked=false
+                                        controlsVisible=!controlsVisible
+                                    })
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -867,6 +979,21 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                         coverColor = inkBackdrop,
                                         darkPage = dark,
                                         smartPrefs = prefs,
+                                        readerSmartGestures = !inkEditing && leafPage == page,
+                                        readerEraser = !inkEditing && readerEraser && leafPage == page,
+                                        onSingleTap = {
+                                            if(!inkEditing && leafPage==page) {
+                                                controlsLocked=false
+                                                controlsVisible=!controlsVisible
+                                            }
+                                        },
+                                        onEraserActivate = {
+                                            if(leafPage==page) {
+                                                if(inkEditing) inkTool="eraser"
+                                                else {readerEraser=true; readerAyah=null}
+                                                notice="Ластик включён: удаляются только графические пометки"
+                                            }
+                                        },
                                         onDraft = { draft ->
                                             if (leafPage == page) {
                                                 inkDraft=draft
@@ -886,7 +1013,7 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                                 val originalVariant=variant
                                                 val originalEnvironment=smartEnvironment
                                                 val tappedBitmap=bitmap ?: return@launch
-                                                val originalColor=inkColor
+                                                val originalColor=if (inkEditing) inkColor else 0xFF999999L
                                                 notice="Определяю строки и границы аята…"
                                                 val selected=withContext(Dispatchers.Default) {
                                                     runCatching { Q7HSmartAyahV10.select(context.applicationContext,
@@ -895,17 +1022,50 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                                 }
                                                 if (smartTapEpoch.get()!=requestEpoch ||
                                                     liveSmartEnvironment.value !== originalEnvironment ||
-                                                    !liveSmartEditing.value ||
                                                     liveSmartPage.value!=originalPage ||
                                                     liveSmartVariant.value!=originalVariant) return@launch
                                                 if(selected==null) notice="Не удалось надёжно определить аят на этой странице"
                                                 else {
                                                     if (smartTapEpoch.get()!=requestEpoch ||
                                                         liveSmartEnvironment.value !== originalEnvironment ||
-                                                        !liveSmartEditing.value ||
-                                                        liveSmartPage.value!=originalPage ||
+                                                    liveSmartPage.value!=originalPage ||
                                                         liveSmartVariant.value!=originalVariant) return@launch
-                                                    val markings=linkedMapOf(originalPage to selected.strokes)
+                                                    // Reopening a previously colored verse must
+                                                    // preserve its color, not reset it to grey.
+                                                    val tag="smart:${selected.ref.surah}:${selected.ref.ayah}:$originalPage"
+                                                    val savedColor=strokesForPage(originalPage)
+                                                        .firstOrNull { it.tool=="smart_marker" && it.text==tag }?.color
+                                                    if(savedColor!=null) {
+                                                        val prefix="smart:${selected.ref.surah}:${selected.ref.ayah}:"
+                                                        val affected=listOf(originalPage-1,originalPage,originalPage+1)
+                                                            .filter { it in 1..604 && strokesForPage(it).any { mark ->
+                                                                mark.tool=="smart_marker" && mark.text=="$prefix$it"
+                                                            } }
+                                                        smartUndoBefore=affected.associateWith { strokesForPage(it).toList() }
+                                                        affected.forEach { targetPage ->
+                                                            val list=strokesForPage(targetPage)
+                                                            if(inkEditing && targetPage !in inkSessionSnapshots)
+                                                                inkSessionSnapshots[targetPage]=list.toList()
+                                                            if(inkEditing && targetPage==page) {
+                                                                inkUndoHistory.add(list.toList())
+                                                                if(inkUndoHistory.size>30) inkUndoHistory.removeAt(0)
+                                                                inkRedoHistory.clear()
+                                                            }
+                                                            list.removeAll { it.tool=="smart_marker" &&
+                                                                it.text=="$prefix$targetPage" }
+                                                            learningDb.saveInk(targetPage,list.toList())
+                                                        }
+                                                        smartUndoAfter=affected.associateWith { strokesForPage(it).toList() }
+                                                        smartRedoAfter=null;smartRedoBefore=null
+                                                        inkCheckpoint=inkStrokes.toList()
+                                                        readerAyah=null
+                                                        notice="Выделение аята ${selected.ref.surah}:${selected.ref.ayah} снято"
+                                                        return@launch
+                                                    }
+                                                    val resolvedColor=savedColor?:originalColor
+                                                    val markings=linkedMapOf(originalPage to selected.strokes.map {
+                                                        it.copy(color=resolvedColor)
+                                                    })
                                                     for(other in listOf(originalPage-1,originalPage+1)) {
                                                         if(other !in 1..604) continue
                                                         val matches=withContext(Dispatchers.IO) {
@@ -913,27 +1073,30 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                                                 other,selected.ref)
                                                         }
                                                         if(!matches)continue
-                                                        val otherBitmap=mushaf.load(other,originalVariant) ?: continue
+                                                        val otherBitmap=withContext(Dispatchers.IO) {
+                                                            mushaf.load(other,originalVariant)
+                                                        } ?: continue
                                                         val result=withContext(Dispatchers.Default) {
                                                             runCatching { Q7HSmartAyahV10.select(context.applicationContext,
                                                                 mushaf,originalVariant,otherBitmap,other,
                                                                 0f,0f,originalColor,selected.ref) }.getOrNull()
                                                         }
-                                                        if(result!=null) markings[other]=result.strokes
+                                                        if(result!=null) markings[other]=result.strokes.map {
+                                                            it.copy(color=resolvedColor)
+                                                        }
                                                     }
                                                     if (smartTapEpoch.get()!=requestEpoch ||
                                                         liveSmartEnvironment.value !== originalEnvironment ||
-                                                        !liveSmartEditing.value ||
-                                                        liveSmartPage.value!=originalPage ||
+                                                    liveSmartPage.value!=originalPage ||
                                                         liveSmartVariant.value!=originalVariant) return@launch
                                                     smartUndoBefore=markings.keys.associateWith {
                                                         strokesForPage(it).toList()
                                                     }
                                                     markings.forEach { (targetPage,newMarks) ->
                                                         val list=strokesForPage(targetPage)
-                                                        if(targetPage !in inkSessionSnapshots)
+                                                        if(inkEditing && targetPage !in inkSessionSnapshots)
                                                             inkSessionSnapshots[targetPage]=list.toList()
-                                                        if(targetPage==page) {
+                                                        if(inkEditing && targetPage==page) {
                                                             inkUndoHistory.add(list.toList())
                                                             if(inkUndoHistory.size>30)inkUndoHistory.removeAt(0)
                                                             inkRedoHistory.clear()
@@ -954,7 +1117,12 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                                     }
                                                     smartRedoAfter=null;smartRedoBefore=null
                                                     inkCheckpoint=inkStrokes.toList()
-                                                    notice="Выделен аят ${selected.ref.surah}:${selected.ref.ayah} — ${markings.size} стр. При необходимости отмените."
+                                                    if (!inkEditing) {
+                                                        readerAyah=Q7HReaderSelectedAyah(selected.ref.surah,selected.ref.ayah,originalPage)
+                                                        readerEraser=false
+                                                        controlsVisible=false
+                                                    }
+                                                    notice="Выделен аят ${selected.ref.surah}:${selected.ref.ayah}"
                                                 }
                                             }
                                         },
@@ -1022,7 +1190,6 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                                 }
                                                 if(smartTapEpoch.get()!=requestEpoch ||
                                                     liveSmartEnvironment.value !== originalEnvironment ||
-                                                    !liveSmartEditing.value ||
                                                     liveSmartPage.value!=originalPage ||
                                                     liveSmartVariant.value!=originalVariant) return@launch
                                                 if(affected.isEmpty()) {
@@ -1033,9 +1200,9 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                                     }
                                                     affected.forEach { (targetPage,entries) ->
                                                         val list=strokesForPage(targetPage)
-                                                        if(targetPage !in inkSessionSnapshots)
+                                                        if(inkEditing && targetPage !in inkSessionSnapshots)
                                                             inkSessionSnapshots[targetPage]=list.toList()
-                                                        if(targetPage==page) {
+                                                        if(inkEditing && targetPage==page) {
                                                             inkUndoHistory.add(list.toList())
                                                             if(inkUndoHistory.size>30)inkUndoHistory.removeAt(0)
                                                             inkRedoHistory.clear()
@@ -1048,7 +1215,55 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                                     }
                                                     smartRedoAfter=null;smartRedoBefore=null
                                                     inkCheckpoint=inkStrokes.toList()
+                                                    if(!inkEditing && readerAyah?.surah==ref.surah && readerAyah?.ayah==ref.ayah)
+                                                        readerAyah=null
                                                     notice="Удалено умное выделение аята ${ref.surah}:${ref.ayah}"
+                                                }
+                                            }
+                                        },
+                                        onSmartPlay = { imagePoint ->
+                                            if(leafPage==page) scope.launch {
+                                                val requestEpoch=smartTapEpoch.incrementAndGet()
+                                                val currentPage=leafPage
+                                                val selectedVariant=variant
+                                                val selectedEnvironment=smartEnvironment
+                                                val image=bitmap ?: return@launch
+                                                val match=withContext(Dispatchers.Default) {
+                                                    runCatching { Q7HSmartAyahV10.select(
+                                                        context.applicationContext,mushaf,selectedVariant,
+                                                        image,currentPage,imagePoint.x,imagePoint.y,inkColor)
+                                                    }.getOrNull()
+                                                }
+                                                if(match==null) {
+                                                    notice="Не удалось определить аят для воспроизведения"
+                                                    return@launch
+                                                }
+                                                if(smartTapEpoch.get()!=requestEpoch ||
+                                                    liveSmartEnvironment.value !== selectedEnvironment ||
+                                                    liveSmartPage.value!=currentPage ||
+                                                    liveSmartVariant.value!=selectedVariant) return@launch
+                                                readerAyah=null
+                                                playReaderVerse(match.ref.surah,match.ref.ayah)
+                                            }
+                                        },
+                                        onTimedGesture = {
+                                            if(leafPage==page) when(prefs.readerTimedGestureAction) {
+                                                "eraser" -> {
+                                                    if(inkEditing) inkTool="eraser"
+                                                    else {readerEraser=true;readerAyah=null}
+                                                    notice="Ластик активирован"
+                                                }
+                                                "drawing" -> {
+                                                    if(!inkEditing) {
+                                                        inkSessionBaseline=inkStrokes.toList()
+                                                        inkSessionSnapshots.clear()
+                                                        inkSessionSnapshots[page]=inkSessionBaseline
+                                                        inkEditing=true;showInk=true;prefs.inkVisible=true
+                                                    }
+                                                }
+                                                "controls" -> {controlsLocked=false;controlsVisible=!controlsVisible}
+                                                "navigation" -> {
+                                                    Q7HBottomNavSettings.enable(context,!Q7HBottomNavSettings.enabled)
                                                 }
                                             }
                                         },
@@ -1081,6 +1296,108 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                     )
                                 }
                             }
+                        }
+                    }
+                }
+                // Quick verse palette: one double tap on the page creates a
+                // grey one-layer highlight; these chips recolor only the tagged
+                // selected verse, including a continuation on the next page.
+                val directAyah = readerAyah
+                if (directAyah != null && sheet == null && !inkEditing) {
+                    val tajweedColors=inkPalette.filter { it.tajweed }
+                        .sortedBy { it.sortOrder }.take(8)
+                    val extraColors=listOf(
+                        if(dark) 0xFFFFFFFFL else 0xFF202020L,
+                        0xFFD8C5A6L,0xFFAF72DCL
+                    ) + inkPalette.filter { it.custom }.sortedBy {it.sortOrder}.map {it.argb}
+                    Surface(
+                        modifier=Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(
+                                start = 10.dp,
+                                end = 10.dp,
+                                bottom = if(controlsVisible) 170.dp else 80.dp
+                            ),
+                        shape=RoundedCornerShape(24.dp),
+                        color=MaterialTheme.colorScheme.surface,
+                        contentColor=MaterialTheme.colorScheme.onSurface,
+                        shadowElevation=9.dp,
+                        tonalElevation=4.dp
+                    ) {
+                        Row(Modifier.widthIn(max=390.dp).padding(horizontal=7.dp,vertical=5.dp)
+                            .horizontalScroll(rememberScrollState()),
+                            verticalAlignment=Alignment.CenterVertically,
+                            horizontalArrangement=Arrangement.spacedBy(5.dp)) {
+                            Text("${directAyah.surah}:${directAyah.ayah}",
+                                style=MaterialTheme.typography.labelSmall)
+                            val paletteArgb=tajweedColors.map {it.argb} + extraColors
+                            paletteArgb.forEachIndexed { index, argb ->
+                                if(index==tajweedColors.size) VerticalDivider(
+                                    modifier=Modifier.height(28.dp).padding(start=4.dp,end=4.dp),
+                                    color=MaterialTheme.colorScheme.outlineVariant)
+                                Box(Modifier.size(28.dp)
+                                    .background(Color(argb.toInt()),CircleShape)
+                                    .border(1.dp,MaterialTheme.colorScheme.outline,CircleShape)
+                                    .clickable {
+                                        for(targetPage in listOf(directAyah.page-1,directAyah.page,directAyah.page+1)) {
+                                            if(targetPage !in 1..604)continue
+                                            val markList=strokesForPage(targetPage)
+                                            val tag="smart:${directAyah.surah}:${directAyah.ayah}:$targetPage"
+                                            var changed=false
+                                            for(i in markList.indices) {
+                                                val stroke=markList[i]
+                                                if(stroke.tool=="smart_marker" && stroke.text==tag) {
+                                                    markList[i]=stroke.copy(color=argb)
+                                                    changed=true
+                                                }
+                                            }
+                                            if(changed)learningDb.saveInk(targetPage,markList.toList())
+                                        }
+                                        readerAyah=null
+                                    }
+                                )
+                            }
+                            IconButton(onClick={
+                                playReaderVerse(directAyah.surah, directAyah.ayah)
+                            },modifier=Modifier.size(35.dp)) {
+                                Icon(Icons.Default.PlayArrow,"Слушать этот аят",Modifier.size(23.dp))
+                            }
+                            IconButton(onClick={readerAyah=null},modifier=Modifier.size(34.dp)) {
+                                Icon(Icons.Default.Close,"Закрыть цвета",Modifier.size(20.dp))
+                            }
+                        }
+                    }
+                }
+                // Three movable shapes share the existing Tafsir Media3 channel.
+                val audioRef = readerAudioAyah
+                if (audioRef != null && sheet == null && !inkEditing) {
+                    Q7HReaderFloatingPlayer(
+                        target=audioRef.surah to audioRef.ayah,
+                        hostSize=inkHostSize,
+                        playback=ayahSnapshot,controller=ayahController,prefs=prefs,
+                        reciters=reciters,reciterError=reciterError,
+                        selectedReciter=selectedReciter,onReciter=::selectAyahReciter,
+                        endMode=ayahMode,onEndMode=::selectAyahMode,
+                        onPlayVerse=::playReaderVerse,
+                        onClose={
+                            // Close means STOP; collapsing never stops background audio.
+                            pendingReaderAudio=null
+                            ayahController?.pause()
+                            ayahController?.stop()
+                            readerAudioAyah=null
+                        }
+                    )
+                }
+                if(readerEraser && !inkEditing && sheet==null) {
+                    Surface(
+                        modifier=Modifier.align(Alignment.TopCenter).padding(top=16.dp),
+                        color=MaterialTheme.colorScheme.secondaryContainer,
+                        shape=RoundedCornerShape(16.dp)) {
+                        Row(verticalAlignment=Alignment.CenterVertically,
+                            modifier=Modifier.padding(start=10.dp)) {
+                            Icon(Icons.Default.AutoFixOff,null,Modifier.size(18.dp))
+                            Text("Ластик включён",style=MaterialTheme.typography.labelSmall)
+                            TextButton(onClick={readerEraser=false}) { Text("Выключить") }
                         }
                     }
                 }
@@ -1506,23 +1823,8 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                         playback = ayahSnapshot, controller = ayahController,
                         reciters = reciters, reciterError = reciterError,
                         selectedReciter = selectedReciter,
-                        onReciter = { chosen ->
-                            selectedReciter = chosen
-                            prefs.selectedReciter = chosen
-                            if (ayahSnapshot.playing && ayahSnapshot.mediaId.startsWith("ayah:")) {
-                                val parts = ayahSnapshot.mediaId.split(':')
-                                val reciter = reciters.firstOrNull { it.repository == chosen }
-                                if (parts.size >= 3 && reciter != null) {
-                                    val s = parts[1].toIntOrNull()
-                                    val a = parts[2].toIntOrNull()
-                                    if (s != null && a != null) ayahConnection.playAyah(reciter, s, a, ayahMode)
-                                }
-                            }
-                        },
-                        endMode = ayahMode, onEndMode = { mode ->
-                            ayahMode = mode; prefs.ayahEndMode = mode.name
-                            ayahConnection.setAyahEndMode(mode)
-                        },
+                        onReciter = ::selectAyahReciter,
+                        endMode = ayahMode, onEndMode = ::selectAyahMode,
                         onPlayVerse = ::playVerse,
                         onNoteAyah = { s, a ->
                             noteEditor = learningNotes.firstOrNull {

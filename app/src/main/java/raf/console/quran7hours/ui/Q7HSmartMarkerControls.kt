@@ -21,8 +21,6 @@ internal fun Q7HSmartMarkerSettings(prefs: UserPreferences) {
     var radius by remember(revision) { mutableFloatStateOf(prefs.inkSmartRadius) }
     var width by remember(revision) { mutableFloatStateOf(prefs.inkSmartBorderWidth) }
     var border by remember(revision) { mutableStateOf(prefs.inkSmartBorderEnabled) }
-    val options = listOf("single" to "Одно", "double" to "Двойное", "long" to "Удержание",
-        "timed" to "Удержание с таймером", "off" to "Выкл.")
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Форма умного выделителя", style = MaterialTheme.typography.titleMedium)
         Text("Радиус скругления · ${(radius*100).roundToInt()}%",
@@ -41,48 +39,65 @@ internal fun Q7HSmartMarkerSettings(prefs: UserPreferences) {
             Slider(value=width,onValueChange={width=it;prefs.inkSmartBorderWidth=it},valueRange=.4f..6f)
         }
         HorizontalDivider()
-        Text("Жесты умного выделителя",style=MaterialTheme.typography.titleMedium)
-        Text("Выделение аята",style=MaterialTheme.typography.labelMedium)
-        Q7HSmartGesturePicker(prefs.inkSmartMarkGesture, options) { value ->
-            prefs.inkSmartMarkGesture=value
-            if(value != "off" && value==prefs.inkSmartClearGesture)
-                prefs.inkSmartClearGesture="off"
+        Text("Выделение и воспроизведение аятов", style = MaterialTheme.typography.titleMedium)
+        Text("Однократное касание всегда показывает или скрывает основную панель Мусхафа. " +
+            "Для двух остальных действий выберите одно из двух расположений.",
+            style = MaterialTheme.typography.bodySmall)
+        val swapped=prefs.readerSwapAyahGestures
+        Column(verticalArrangement=Arrangement.spacedBy(6.dp)) {
+            FilterChip(selected=!swapped,
+                onClick={prefs.readerSwapAyahGestures=false},
+                label={Text("Двойное — выделить / снять · Долгое — воспроизвести")})
+            FilterChip(selected=swapped,
+                onClick={prefs.readerSwapAyahGestures=true},
+                label={Text("Двойное — воспроизвести · Долгое — выделить / снять")})
         }
-        Text("Удаление выделения аята",style=MaterialTheme.typography.labelMedium)
-        Q7HSmartGesturePicker(prefs.inkSmartClearGesture, options) { value ->
-            prefs.inkSmartClearGesture=value
-            if(value != "off" && value==prefs.inkSmartMarkGesture)
-                prefs.inkSmartMarkGesture="off"
-        }
-        val seconds = prefs.inkSmartHoldSeconds
-        Text("Таймер после обычного удержания · $seconds сек",style=MaterialTheme.typography.labelMedium)
-        Slider(value=seconds.toFloat(),onValueChange={prefs.inkSmartHoldSeconds=it.roundToInt()},
-            valueRange=1f..10f,steps=8)
-        Text("Индикатор обратного отсчёта",style=MaterialTheme.typography.labelMedium)
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-            listOf("left" to "Слева", "right" to "Справа", "top" to "Сверху").forEach { (id,label) ->
-                FilterChip(selected=prefs.inkSmartCountdownSide==id,
-                    onClick={prefs.inkSmartCountdownSide=id},label={Text(label)})
+        Text("Повторный жест по уже выделенному аяту снимает только его умное выделение. " +
+            "Плеер Мусхафа использует тех же чтецов и режимы, что и Тафсир.",
+            style=MaterialTheme.typography.bodySmall,
+            color=MaterialTheme.colorScheme.onSurfaceVariant)
+        HorizontalDivider()
+        Text("Дополнительные жесты с таймером",style=MaterialTheme.typography.titleMedium)
+        Text("Необязательное действие после продолжительного удержания пальца. " +
+            "Отключено по умолчанию. Основные двойное и долгое нажатия не меняет.",
+            style=MaterialTheme.typography.bodySmall)
+        val timed=prefs.readerTimedGestureAction
+        val choices=listOf(
+            "off" to "Выключено", "eraser" to "Ластик", "drawing" to "Графическая панель",
+            "controls" to "Основные кнопки", "navigation" to "Сменить навигацию"
+        )
+        Column(verticalArrangement=Arrangement.spacedBy(3.dp)) {
+            choices.chunked(2).forEach { group ->
+                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(4.dp)) {
+                    group.forEach { (key,label) ->
+                        FilterChip(selected=timed==key,onClick={prefs.readerTimedGestureAction=key},
+                            label={Text(label,maxLines=2)},modifier=Modifier.weight(1f))
+                    }
+                    if(group.size==1) Spacer(Modifier.weight(1f))
+                }
             }
         }
-        Text("Индикатор смещается к свободной стороне, если касание близко к краю. " +
-            "Отпустите палец до окончания отсчёта, чтобы отменить действие.",
-            style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+        if(timed!="off") {
+            val seconds=prefs.readerTimedGestureMs/1000f
+            Text("Дополнительное удержание: ${"%.1f".format(seconds)} с",
+                style=MaterialTheme.typography.labelMedium)
+            Slider(value=seconds.coerceIn(1.5f,10f),
+                onValueChange={prefs.readerTimedGestureMs=(it*1000f).toLong()},
+                valueRange=1.5f..10f,steps=16)
+            Text("Отсчёт начинается после системного долгого нажатия. " +
+                "Для режима смены навигации переключаются обычная и нижняя панели.",
+                style=MaterialTheme.typography.bodySmall)
+            Text("Положение индикатора",style=MaterialTheme.typography.labelMedium)
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                listOf("left" to "Слева", "right" to "Справа", "top" to "Сверху")
+                    .forEach { (id,label) ->
+                        FilterChip(selected=prefs.inkSmartCountdownSide==id,
+                            onClick={prefs.inkSmartCountdownSide=id},label={Text(label)})
+                    }
+            }
+        }
+
     }
 }
 
-@Composable
-private fun Q7HSmartGesturePicker(value:String, options:List<Pair<String,String>>, onValue:(String)->Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        OutlinedButton(onClick={expanded=true}) {
-            Text(options.firstOrNull { it.first==value }?.second ?: "Выбрать")
-        }
-        DropdownMenu(expanded=expanded,onDismissRequest={expanded=false}) {
-            options.forEach { (key,label) ->
-                DropdownMenuItem(text={Text(label)},onClick={onValue(key);expanded=false})
-            }
-        }
-    }
-}

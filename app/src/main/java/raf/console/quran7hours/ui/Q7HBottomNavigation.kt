@@ -54,7 +54,7 @@ internal object Q7HBottomNavSettings {
     )
     private const val STORE = "q7h_bottom_navigation_v1"
     private var initialized = false
-    var enabled by mutableStateOf(true)
+    var enabled by mutableStateOf(false)
         private set
     var layout by mutableStateOf(TWO_ROWS)
         private set
@@ -74,7 +74,7 @@ internal object Q7HBottomNavSettings {
     @Synchronized fun load(context: Context) {
         if (initialized) return
         val p = prefs(context)
-        enabled = p.getBoolean("enabled", true)
+        enabled = p.getBoolean("enabled", false)
         layout = p.getString("layout", TWO_ROWS)?.takeIf { it in modes } ?: TWO_ROWS
         orders = modes.associateWith { mode ->
             val stored = p.getString("order_$mode", null)?.split(',') ?: emptyList()
@@ -502,17 +502,40 @@ internal fun Q7HBottomNavigationSettings() {
     val context=LocalContext.current
     Q7HBottomNavSettings.load(context)
     val state=Q7HBottomNavSettings
+    val readerPrefs=remember(context.applicationContext) { raf.console.quran7hours.data.UserPreferences(context) }
+    var offerTimedNavigation by remember { mutableStateOf(false) }
+    var suggestedSeconds by remember { mutableFloatStateOf(readerPrefs.readerTimedGestureMs/1000f) }
     HorizontalDivider()
     Text("Нижняя панель навигации",style=MaterialTheme.typography.titleMedium)
     Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("Нижняя панель навигации")
-            Text("Включена по умолчанию. Отпечаток пальца открывает меню разделов; удержание — джойстик.",
+            Text("Включается по желанию. Отпечаток пальца открывает меню разделов; удержание — джойстик.",
                 style=MaterialTheme.typography.bodySmall,
                 color=MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Switch(checked=state.enabled,onCheckedChange={state.enable(context,it)})
+        Switch(checked=state.enabled,onCheckedChange={enabled->
+            state.enable(context,enabled)
+            if(enabled) offerTimedNavigation=true
+        })
     }
+    if(offerTimedNavigation) AlertDialog(
+        onDismissRequest={offerTimedNavigation=false},
+        title={Text("Быстрая смена навигации")},
+        text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            Text("Можно дополнительно переключать обычную и нижнюю панели " +
+                "продолжительным удержанием в Мусхафе. Основные жесты аятов сохранятся.")
+            Text("Продолжительность: ${"%.1f".format(suggestedSeconds)} с")
+            Slider(value=suggestedSeconds.coerceIn(1.5f,10f),
+                onValueChange={suggestedSeconds=it},valueRange=1.5f..10f,steps=16)
+        }},
+        confirmButton={TextButton(onClick={
+            readerPrefs.readerTimedGestureMs=(suggestedSeconds*1000f).toLong()
+            readerPrefs.readerTimedGestureAction="navigation"
+            offerTimedNavigation=false
+        }){Text("Включить жест")}},
+        dismissButton={TextButton(onClick={offerTimedNavigation=false}){Text("Не сейчас")}}
+    )
     if (!state.enabled) {
         Text("Верхняя панель Мусхафа",style=MaterialTheme.typography.titleMedium)
         Text("Во время графических пометок удерживайте отпечаток пальца рядом с кнопками " +

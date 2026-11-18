@@ -687,6 +687,12 @@ internal fun InkPageLayer(
     onDraft: (InkStroke?) -> Unit,
     onSmartTap: (InkPoint) -> Unit,
     onSmartClear: (InkPoint) -> Unit,
+    onSmartPlay: (InkPoint) -> Unit = {},
+    onTimedGesture: () -> Unit = {},
+    onSingleTap: () -> Unit = {},
+    onEraserActivate: () -> Unit = {},
+    readerSmartGestures: Boolean = false,
+    readerEraser: Boolean = false,
     smartPrefs: UserPreferences,
     editable: Boolean,
     coverColor: Color,
@@ -701,133 +707,142 @@ internal fun InkPageLayer(
     val draftCallback=rememberUpdatedState(onDraft)
     val smartCallback=rememberUpdatedState(onSmartTap)
     val clearCallback=rememberUpdatedState(onSmartClear)
+    val playCallback=rememberUpdatedState(onSmartPlay)
+    val timedCallback=rememberUpdatedState(onTimedGesture)
+    val singleCallback=rememberUpdatedState(onSingleTap)
+    val eraserCallback=rememberUpdatedState(onEraserActivate)
     val gestureScope = rememberCoroutineScope()
+    // Read snapshot state so changing marker settings recomposes the overlay.
+    @Suppress("UNUSED_VARIABLE")
     val smartRevision = smartPrefs.inkSmartSettingsRevision
-    val markGesture = smartPrefs.inkSmartMarkGesture
-    val clearGesture = smartPrefs.inkSmartClearGesture
-    val holdSeconds = smartPrefs.inkSmartHoldSeconds
     val countdownSide = smartPrefs.inkSmartCountdownSide
     val markerRadius = smartPrefs.inkSmartRadius
     val markerBorder = smartPrefs.inkSmartBorderEnabled
     val markerBorderWidth = smartPrefs.inkSmartBorderWidth
-    data class Countdown(val x: Float, val y: Float, val remaining: Float, val total: Int)
+    data class Countdown(val x: Float, val y: Float, val remaining: Float, val total: Float)
     var countdown by remember { mutableStateOf<Countdown?>(null) }
-    val drawInput = if (editable) Modifier.pointerInput(bitmap, strokes, tool, inkColor, width) {
+    // In reading mode the canvas remains immutable: only Room ink strokes can
+    // be added/removed. An activated reader eraser can drag over marks without
+    // opening the complete drawing toolbar.
+    val drawingTool = if (!editable && readerEraser) "eraser" else tool
+    val drawInput = if (editable || readerEraser) Modifier.pointerInput(
+        bitmap, strokes, drawingTool, inkColor, width, editable, readerEraser
+    ) {
         fun point(offset: Offset): InkPoint? {
             val fit = min(size.width / bitmap.width.toFloat(), size.height / bitmap.height.toFloat())
             val w = bitmap.width * fit; val h = bitmap.height * fit
             val left = (size.width - w) / 2f; val top = (size.height - h) / 2f
-            if (offset.x < left || offset.x > left + w || offset.y < top || offset.y > top + h) return null
-            return InkPoint(((offset.x - left) / w).coerceIn(0f, 1f),
-                ((offset.y - top) / h).coerceIn(0f, 1f))
+            if (offset.x !in left..(left+w) || offset.y !in top..(top+h)) return null
+            return InkPoint(((offset.x-left)/w).coerceIn(0f,1f), ((offset.y-top)/h).coerceIn(0f,1f))
         }
-        fun erase(point: InkPoint) {
-            val candidate = strokes.indexOfLast { stroke ->
-                q7hInkEraseHit(stroke, point, bitmap.width.toFloat() / bitmap.height, tap = false)
+        fun erase(p: InkPoint) {
+            val hit = strokes.indexOfLast { stroke ->
+                q7hInkEraseHit(stroke, p, bitmap.width.toFloat()/bitmap.height, tap=false)
             }
-            if (candidate >= 0) { strokes.removeAt(candidate); current.value() }
+            if(hit>=0) {strokes.removeAt(hit);current.value()}
         }
         detectDragGestures(
             onDragStart = { offset ->
-                draftCallback.value(null)
-                active.clear()
+                draftCallback.value(null);active.clear()
                 point(offset)?.let { p ->
-                    if (tool == "eraser") erase(p)
-                    else if (tool != "text" && tool != "smart_marker") active.add(p)
+                    if(drawingTool=="eraser") erase(p)
+                    else if(drawingTool!="text" && drawingTool!="smart_marker") active.add(p)
                 }
-                inProgress = true
+                inProgress=true
             },
-            onDrag = { change, _ ->
+            onDrag={change,_->
                 change.consume()
                 point(change.position)?.let { p ->
-                    if (tool == "eraser") erase(p)
-                    else if (inProgress && tool != "text" && tool != "smart_marker") {
-                        // Straightedge markers/pencils stay on a horizontal line even
-                        // if the finger drifts vertically; saved stroke is deterministic.
-                        val horizontal = tool == "marker_ruler" ||
-                            tool == "marker_ruler_single" || tool == "pen_ruler"
-                        active.add(if(horizontal && active.isNotEmpty()) p.copy(y = active.first().y) else p)
-                        if (active.isNotEmpty()) draftCallback.value(InkStroke(tool,inkColor,width,active.toList()))
+                    if(drawingTool=="eraser") erase(p)
+                    else if(inProgress && drawingTool!="text" && drawingTool!="smart_marker") {
+                        val straight=drawingTool=="marker_ruler" || drawingTool=="marker_ruler_single" || drawingTool=="pen_ruler"
+                        active.add(if(straight && active.isNotEmpty()) p.copy(y=active.first().y) else p)
+                        if(active.isNotEmpty()) draftCallback.value(InkStroke(drawingTool,inkColor,width,active.toList()))
                     }
                 }
             },
-            onDragCancel = { active.clear(); inProgress = false;draftCallback.value(null) },
-            onDragEnd = {
-                if (tool != "eraser" && tool != "text" && tool != "smart_marker" && active.isNotEmpty()) {
-                    strokes.add(InkStroke(tool, inkColor, width, active.toList()))
+            onDragCancel={active.clear();inProgress=false;draftCallback.value(null)},
+            onDragEnd={
+                if(drawingTool!="eraser" && drawingTool!="text" && drawingTool!="smart_marker" && active.isNotEmpty()) {
+                    strokes.add(InkStroke(drawingTool,inkColor,width,active.toList()))
                     current.value()
                 }
-                active.clear(); inProgress = false;draftCallback.value(null)
+                active.clear();inProgress=false;draftCallback.value(null)
             }
         )
     } else Modifier
-    val tapInput = if (editable) Modifier.pointerInput(
-        bitmap, strokes, tool, inkColor, width, markGesture, clearGesture, holdSeconds
+    // Reader and editor use the SAME two gestures. Single tap is reserved for
+    // toolbar visibility in reading mode and cannot be rebound to another action.
+    // The optional extra-timed action is independent and disabled by default.
+    val swapReaderActions = smartPrefs.readerSwapAyahGestures
+    val timedAction = smartPrefs.readerTimedGestureAction
+    val timedMs = smartPrefs.readerTimedGestureMs
+    val tapInput = if(editable || readerSmartGestures) Modifier.pointerInput(
+        bitmap, strokes, drawingTool, editable, readerSmartGestures,
+        swapReaderActions, timedAction, timedMs
     ) {
-        var timedAction: Job? = null
+        var timedJob: Job? = null
         fun imagePoint(offset: Offset): InkPoint? {
-            val fit = min(size.width / bitmap.width.toFloat(), size.height / bitmap.height.toFloat())
-            val w = bitmap.width * fit; val h = bitmap.height * fit
-            val l = (size.width - w) / 2f; val t = (size.height - h) / 2f
-            if (offset.x !in l..(l+w) || offset.y !in t..(t+h)) return null
-            return InkPoint(((offset.x-l)/w).coerceIn(0f,1f),((offset.y-t)/h).coerceIn(0f,1f))
+            val fit=min(size.width/bitmap.width.toFloat(),size.height/bitmap.height.toFloat())
+            val w=bitmap.width*fit;val h=bitmap.height*fit
+            val l=(size.width-w)/2f;val t=(size.height-h)/2f
+            if(offset.x !in l..(l+w) || offset.y !in t..(t+h)) return null
+            return InkPoint(((offset.x-l)/w).coerceIn(0f,1f), ((offset.y-t)/h).coerceIn(0f,1f))
         }
-        fun perform(action:String, offset:Offset) {
-            val point=imagePoint(offset) ?: return
-            when {
-                tool == "smart_marker" && action==markGesture -> smartCallback.value(point)
-                tool == "smart_marker" && action==clearGesture -> clearCallback.value(point)
-                tool == "text" && action=="single" -> {
-                    textEntry="";textPosition=point
-                }
-                tool == "eraser" && action=="single" -> {
-                    val index=strokes.indexOfLast { item ->
-                        q7hInkEraseHit(item,point,bitmap.width.toFloat()/bitmap.height,true)
+        fun editTap(offset: Offset) {
+            val point=imagePoint(offset)?:return
+            when(drawingTool) {
+                "text" -> {textEntry="";textPosition=point}
+                "eraser" -> {
+                    val hit=strokes.indexOfLast {
+                        q7hInkEraseHit(it,point,bitmap.width.toFloat()/bitmap.height,true)
                     }
-                    if(index>=0) { strokes.removeAt(index); current.value() }
+                    if(hit>=0){strokes.removeAt(hit);current.value()}
                 }
-                tool != "smart_marker" && tool != "eraser" && tool != "text" && action=="single" -> {
-                    strokes.add(InkStroke(tool,inkColor,width,listOf(point)))
-                    current.value()
-                }
+                "smart_marker" -> Unit
+                else -> {strokes.add(InkStroke(drawingTool,inkColor,width,listOf(point)));current.value()}
             }
         }
         detectTapGestures(
-            onPress = {
+            onPress={
                 try { tryAwaitRelease() } finally {
-                    // Release, cancellation or leaving drawing mode all cancel.
-                    timedAction?.cancel()
-                    timedAction=null
-                    countdown=null
+                    timedJob?.cancel();timedJob=null;countdown=null
                 }
             },
-            onTap = { offset -> perform("single",offset) },
-            onDoubleTap = if(tool=="smart_marker" &&
-                (markGesture=="double" || clearGesture=="double")) {
-                { offset: Offset -> perform("double",offset) }
-            } else null,
-            onLongPress = { offset ->
-                if(tool=="smart_marker") {
-                    if(markGesture=="long" || clearGesture=="long") {
-                        perform("long",offset)
-                    } else if(markGesture=="timed" || clearGesture=="timed") {
-                        val target=imagePoint(offset)
-                        if(target!=null) {
-                            timedAction?.cancel()
-                            timedAction=gestureScope.launch {
-                                val started=SystemClock.uptimeMillis()
-                                val duration=holdSeconds*1000L
-                                try {
-                                    while(true) {
-                                        val elapsed=SystemClock.uptimeMillis()-started
-                                        val remaining=(1f-elapsed.toFloat()/duration).coerceIn(0f,1f)
-                                        countdown=Countdown(offset.x,offset.y,remaining,holdSeconds)
-                                        if(elapsed>=duration) break
-                                        delay(40L)
-                                    }
-                                    perform("timed",offset)
-                                } finally { countdown=null }
+            onTap={offset->
+                if(!editable) {
+                    if(readerEraser) imagePoint(offset)?.let {p->
+                        val hit=strokes.indexOfLast {
+                            q7hInkEraseHit(it,p,bitmap.width.toFloat()/bitmap.height,true)
+                        }
+                        if(hit>=0){strokes.removeAt(hit);current.value()}
+                    }
+                    singleCallback.value()
+                } else editTap(offset)
+            },
+            onDoubleTap={offset: Offset ->
+                imagePoint(offset)?.let { point ->
+                    if(swapReaderActions) playCallback.value(point)
+                    else smartCallback.value(point)
+                }
+            },
+            onLongPress={offset ->
+                imagePoint(offset)?.let { point ->
+                    if(swapReaderActions) smartCallback.value(point)
+                    else playCallback.value(point)
+                    if(timedAction!="off") {
+                        timedJob?.cancel()
+                        timedJob=gestureScope.launch {
+                            val began=SystemClock.uptimeMillis()
+                            while(true) {
+                                val fraction=(1f-(SystemClock.uptimeMillis()-began).toFloat()/timedMs)
+                                    .coerceIn(0f,1f)
+                                countdown=Countdown(offset.x,offset.y,fraction,timedMs/1000f)
+                                if(fraction<=0f) break
+                                delay(40L)
                             }
+                            countdown=null
+                            timedCallback.value()
                         }
                     }
                 }
@@ -949,7 +964,7 @@ internal fun InkPageLayer(
             .size(54.dp).background(MaterialTheme.colorScheme.surface.copy(alpha=.95f),CircleShape),
             contentAlignment=Alignment.Center) {
             CircularProgressIndicator(progress={c.remaining}, modifier=Modifier.fillMaxSize().padding(5.dp))
-            Text(ceil(c.remaining*c.total).toInt().coerceAtLeast(0).toString(),
+            Text(String.format(java.util.Locale.ROOT,"%.1f",(c.remaining*c.total).coerceAtLeast(0f)),
                 color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
         }
     }
@@ -1138,8 +1153,7 @@ internal fun InkToolbar(
             color=MaterialTheme.colorScheme.surface,tonalElevation=8.dp,shadowElevation=4.dp) {
             Box(Modifier.fillMaxSize()
                 .pointerInput(Unit) {
-                    detectDragGesturesAfterLongPress(
-                        onDragStart={haptic.performHapticFeedback(HapticFeedbackType.LongPress)},
+                    detectDragGestures(
                         onDragCancel=onDragFinished,onDragEnd=onDragFinished
                     ) { change, drag ->
                         change.consume()
@@ -1159,10 +1173,10 @@ internal fun InkToolbar(
         color=MaterialTheme.colorScheme.surface,
         contentColor=onSurface, tonalElevation=8.dp, shadowElevation=4.dp
     ) {
-        Column(Modifier.widthIn(max=380.dp).heightIn(max=maxPanelHeight)
-                .padding(horizontal=8.dp,vertical=5.dp),
-            verticalArrangement=Arrangement.spacedBy(3.dp)) {
-            Row(Modifier.fillMaxWidth().height(44.dp),
+        Column(Modifier.widthIn(max=340.dp).heightIn(max=maxPanelHeight)
+                .padding(horizontal=6.dp,vertical=3.dp),
+            verticalArrangement=Arrangement.spacedBy(2.dp)) {
+            Row(Modifier.fillMaxWidth().height(30.dp),
                 verticalAlignment=Alignment.CenterVertically,
                 horizontalArrangement=Arrangement.SpaceBetween) {
                 Box(Modifier.weight(1f).fillMaxHeight().then(gripDrag),
@@ -1176,20 +1190,20 @@ internal fun InkToolbar(
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.Center,
                 verticalAlignment=Alignment.CenterVertically) {
-                IconButton(onClick=onUndo,enabled=canUndo,modifier=Modifier.size(46.dp)) {
+                IconButton(onClick=onUndo,enabled=canUndo,modifier=Modifier.size(35.dp)) {
                     Icon(Icons.Default.Undo,"Отменить",tint=if(canUndo)onSurface else dimmed)
                 }
-                IconButton(onClick=onRedo,enabled=canRedo,modifier=Modifier.size(46.dp)) {
+                IconButton(onClick=onRedo,enabled=canRedo,modifier=Modifier.size(35.dp)) {
                     Icon(Icons.Default.Redo,"Повторить",tint=if(canRedo)onSurface else dimmed)
                 }
-                IconButton(onClick=onClear,enabled=canClear,modifier=Modifier.size(46.dp)) {
+                IconButton(onClick=onClear,enabled=canClear,modifier=Modifier.size(35.dp)) {
                     Icon(Icons.Default.DeleteSweep,"Удалить все пометки",tint=if(canClear)onSurface else dimmed)
                 }
-                IconButton(onClick=onSave,modifier=Modifier.size(46.dp)) {
+                IconButton(onClick=onSave,modifier=Modifier.size(35.dp)) {
                     Icon(Icons.Default.CheckCircle,"Сохранить изменения и завершить",
                         tint=MaterialTheme.colorScheme.primary)
                 }
-                IconButton(onClick=onCollapse,modifier=Modifier.size(46.dp)) {
+                IconButton(onClick=onCollapse,modifier=Modifier.size(35.dp)) {
                     Icon(if(state=="collapsed") Icons.Default.UnfoldMore else Icons.Default.UnfoldLess,
                         if(state=="collapsed") "Развернуть палитру" else "Свернуть палитру")
                 }
@@ -1199,13 +1213,13 @@ internal fun InkToolbar(
             // the entire set of tools, colors and thickness controls.
             Column(Modifier.fillMaxWidth().weight(1f, fill=false)
                 .verticalScroll(rememberScrollState()),
-                verticalArrangement=Arrangement.spacedBy(3.dp)) {
+                verticalArrangement=Arrangement.spacedBy(2.dp)) {
             if(state=="expanded" || collapsedTools) {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     verticalAlignment=Alignment.CenterVertically,
-                    horizontalArrangement=Arrangement.spacedBy(3.dp)) {
+                    horizontalArrangement=Arrangement.spacedBy(2.dp)) {
                     FilterChip(selected=tool=="smart_marker",onClick={onTool("smart_marker")},
-                        label={Text("Умный выделитель аятов",fontSize=12.sp)},
+                        label={Text("Умный выделитель аятов",fontSize=11.sp)},
                         leadingIcon={Icon(Icons.Default.AutoAwesome,null,Modifier.size(16.dp))})
                     Box {
                         IconButton(onClick={openInfo=true},modifier=Modifier.size(34.dp)) {
@@ -1213,11 +1227,10 @@ internal fun InkToolbar(
                         }
                         DropdownMenu(expanded=openInfo,onDismissRequest={openInfo=false},
                             modifier=Modifier.widthIn(min=260.dp,max=320.dp)) {
-                            Text("Умный выделитель аятов выделяет один аят двойным касанием. " +
-                                "Удаление выделения — удержанием с таймером 3 секунды. " +
-                                "Жесты можно изменить: одиночное, двойное, обычное удержание " +
-                                "или удержание с обратным отсчётом. " +
-                                "При отпускании пальца до конца отсчёта действие отменяется.",
+                            Text("Дважды коснитесь аята, чтобы выделить его; повторное двойное " +
+                                "касание снимает выделение. Долгое касание воспроизводит аят " +
+                                "в общем плеере Тафсира. Два действия можно поменять местами " +
+                                "в настройках. Дополнительные жесты с таймером необязательны.",
                                 modifier=Modifier.padding(14.dp),style=MaterialTheme.typography.bodySmall)
                             TextButton(onClick={openInfo=false},modifier=Modifier.align(Alignment.End)) {
                                 Text("Закрыть")
@@ -1236,7 +1249,7 @@ internal fun InkToolbar(
                     verticalAlignment=Alignment.CenterVertically) {
                     orderedTools.filterNot { it == "smart_marker" }.forEach { id ->
                         IconToggleButton(checked=tool==id,onCheckedChange={onTool(id)},
-                            modifier=Modifier.size(52.dp)) {
+                            modifier=Modifier.size(43.dp)) {
                             Q7HInkToolIcon(id,Q7HInkToolLabels.names[id]?:id,
                                 if(tool==id)MaterialTheme.colorScheme.primary else onSurface)
                         }
@@ -1257,7 +1270,7 @@ internal fun InkToolbar(
             } // end scrollable body; bottom handle is OUTSIDE the scroll area
             // Bottom grip remains reachable when the palette is tall or
             // the top row was previously placed near a screen edge.
-            Box(Modifier.fillMaxWidth().height(44.dp).then(gripDrag),
+            Box(Modifier.fillMaxWidth().height(30.dp).then(gripDrag),
                 contentAlignment=Alignment.Center) {
                 Icon(Icons.Default.DragHandle,
                     "Перетащить палитру за две полоски внизу",

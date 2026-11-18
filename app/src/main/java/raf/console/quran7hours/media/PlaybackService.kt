@@ -10,6 +10,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import kotlinx.coroutines.CoroutineScope
@@ -439,11 +440,17 @@ class PlaybackService : MediaSessionService() {
             repeatMode = Player.REPEAT_MODE_OFF
             playWhenReady = false
         }
-        tafsirAyah = ExoPlayer.Builder(this).build().apply {
+        // Both ayah engines read from the SAME bounded cache as preloading.
+        // The Hadr engine remains unchanged (local MP3, no network).
+        val ayahSources = DefaultMediaSourceFactory(this)
+            .setDataSourceFactory(Q7HAyahStreamCache.factory(this))
+        tafsirAyah = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(ayahSources).build().apply {
             setAudioAttributes(audioAttributes, true)
             setHandleAudioBecomingNoisy(true)
         }
-        hafizAyah = ExoPlayer.Builder(this).build().apply {
+        hafizAyah = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(ayahSources).build().apply {
             setAudioAttributes(audioAttributes, true)
             setHandleAudioBecomingNoisy(true)
         }

@@ -45,7 +45,7 @@ class UserPreferences(context: Context) {
     fun panelViewport(id: String): Pair<Int, Int> {
         require(id.matches(Regex("[a-zA-Z0-9_]{1,50}")))
         return p.getInt("panel_${id}_index", 0).coerceAtLeast(0) to
-            p.getInt("panel_${id}_offset", 0).coerceAtLeast(0)
+                p.getInt("panel_${id}_offset", 0).coerceAtLeast(0)
     }
     fun savePanelViewport(id: String, index: Int, offset: Int) {
         require(id.matches(Regex("[a-zA-Z0-9_]{1,50}")))
@@ -106,7 +106,7 @@ class UserPreferences(context: Context) {
         get() {
             val saved=p.getString("ink_tool_order_v2", "")?.split(',') ?: emptyList()
             return if (saved.size==INK_TOOLS.size && saved.toSet()==INK_TOOLS.toSet()) saved
-                else saved.filter { it in INK_TOOLS }.distinct() + INK_TOOLS.filterNot { it in saved }
+            else saved.filter { it in INK_TOOLS }.distinct() + INK_TOOLS.filterNot { it in saved }
         }
         set(value) {
             if(value.size==INK_TOOLS.size && value.toSet()==INK_TOOLS.toSet())
@@ -137,12 +137,10 @@ class UserPreferences(context: Context) {
         set(value) { p.edit().putFloat("smart_marker_border_width_v8",value.coerceIn(.4f,6f)).apply(); touchSmartSettings() }
     /** Mutually exclusive gesture binding for add/remove. */
     var inkSmartMarkGesture: String
-        get() = p.getString("smart_marker_add_gesture_v8", "double")
-            ?.takeIf { it in SMART_GESTURES } ?: "double"
+        get() = "double"
         set(value) { if (value in SMART_GESTURES) { p.edit().putString("smart_marker_add_gesture_v8",value).apply(); touchSmartSettings() } }
     var inkSmartClearGesture: String
-        get() = p.getString("smart_marker_clear_gesture_v8", "timed")
-            ?.takeIf { it in SMART_GESTURES } ?: "timed"
+        get() = "long"
         set(value) { if (value in SMART_GESTURES) { p.edit().putString("smart_marker_clear_gesture_v8",value).apply(); touchSmartSettings() } }
     var inkSmartHoldSeconds: Int
         get() = p.getInt("smart_marker_hold_seconds_v8", 3).coerceIn(1,10)
@@ -151,6 +149,48 @@ class UserPreferences(context: Context) {
         get() = p.getString("smart_marker_countdown_side_v8", "left")
             ?.takeIf { it in setOf("left","right","top") } ?: "left"
         set(value) { if (value in setOf("left","right","top")) { p.edit().putString("smart_marker_countdown_side_v8",value).apply(); touchSmartSettings() } }
+    /** Long hold after the system long-press threshold enables ink-only eraser.
+     * This setting lives in the existing SharedPreferences backup snapshot. */
+    var inkHoldEraserEnabled: Boolean
+        get() = p.getBoolean("ink_hold_eraser_v9", false)
+        set(value) { p.edit().putBoolean("ink_hold_eraser_v9",value).apply(); touchSmartSettings() }
+
+    /** Reader gestures have exactly two assignable actions. Single tap is NEVER reassigned. */
+    var readerSwapAyahGestures: Boolean
+        get() = p.getBoolean("reader_swap_ayah_gestures_v10", false)
+        set(value) { p.edit().putBoolean("reader_swap_ayah_gestures_v10", value).apply(); touchSmartSettings() }
+    /** Advanced timed gesture is disabled by default and independent of the two main actions. */
+    var readerTimedGestureAction: String
+        get() = p.getString("reader_timed_gesture_action_v10", "off")
+            ?.takeIf { it in setOf("off", "eraser", "drawing", "controls", "navigation") } ?: "off"
+        set(value) { if(value in setOf("off", "eraser", "drawing", "controls", "navigation")) {
+            p.edit().putString("reader_timed_gesture_action_v10", value).apply(); touchSmartSettings()
+        } }
+    var readerTimedGestureMs: Long
+        get() = p.getLong("reader_timed_gesture_ms_v10", 2500L).coerceIn(1500L, 10000L)
+        set(value) { p.edit().putLong("reader_timed_gesture_ms_v10", value.coerceIn(1500L,10000L)).apply(); touchSmartSettings() }
+    /** Full, one-row and square share a single playback channel with the Tafsir. */
+    var readerPlayerDisplay: String
+        get() = p.getString("reader_player_display_v10", "full")
+            ?.takeIf { it in setOf("full", "row", "square") } ?: "full"
+        set(value) { if(value in setOf("full", "row", "square"))
+            p.edit().putString("reader_player_display_v10", value).apply() }
+    var readerPlayerFullX: Float
+        get() = p.getFloat("reader_player_full_x_v10", .5f).coerceIn(0f,1f)
+        set(value) { p.edit().putFloat("reader_player_full_x_v10",value.coerceIn(0f,1f)).apply() }
+    var readerPlayerFullY: Float
+        get() = p.getFloat("reader_player_full_y_v10", .78f).coerceIn(0f,1f)
+        set(value) { p.edit().putFloat("reader_player_full_y_v10",value.coerceIn(0f,1f)).apply() }
+    var readerPlayerSquareX: Float
+        get() = p.getFloat("reader_player_square_x_v10", .85f).coerceIn(0f,1f)
+        set(value) { p.edit().putFloat("reader_player_square_x_v10",value.coerceIn(0f,1f)).apply() }
+    var readerPlayerSquareY: Float
+        get() = p.getFloat("reader_player_square_y_v10", .70f).coerceIn(0f,1f)
+        set(value) { p.edit().putFloat("reader_player_square_y_v10",value.coerceIn(0f,1f)).apply() }
+    var readerPlayerRowTop: Boolean
+        get() = p.getBoolean("reader_player_row_top_v10", false)
+        set(value) { p.edit().putBoolean("reader_player_row_top_v10",value).apply() }
+
     var inkSmartTapCount: Int
         get() = p.getInt("ink_smart_taps_v4", 2).coerceIn(1,2)
         set(value) = p.edit().putInt("ink_smart_taps_v4", value.coerceIn(1,2)).apply()
