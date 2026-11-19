@@ -45,7 +45,7 @@ class UserPreferences(context: Context) {
     fun panelViewport(id: String): Pair<Int, Int> {
         require(id.matches(Regex("[a-zA-Z0-9_]{1,50}")))
         return p.getInt("panel_${id}_index", 0).coerceAtLeast(0) to
-                p.getInt("panel_${id}_offset", 0).coerceAtLeast(0)
+            p.getInt("panel_${id}_offset", 0).coerceAtLeast(0)
     }
     fun savePanelViewport(id: String, index: Int, offset: Int) {
         require(id.matches(Regex("[a-zA-Z0-9_]{1,50}")))
@@ -106,7 +106,7 @@ class UserPreferences(context: Context) {
         get() {
             val saved=p.getString("ink_tool_order_v2", "")?.split(',') ?: emptyList()
             return if (saved.size==INK_TOOLS.size && saved.toSet()==INK_TOOLS.toSet()) saved
-            else saved.filter { it in INK_TOOLS }.distinct() + INK_TOOLS.filterNot { it in saved }
+                else saved.filter { it in INK_TOOLS }.distinct() + INK_TOOLS.filterNot { it in saved }
         }
         set(value) {
             if(value.size==INK_TOOLS.size && value.toSet()==INK_TOOLS.toSet())
@@ -190,6 +190,47 @@ class UserPreferences(context: Context) {
     var readerPlayerRowTop: Boolean
         get() = p.getBoolean("reader_player_row_top_v10", false)
         set(value) { p.edit().putBoolean("reader_player_row_top_v10",value).apply() }
+    /** Normalized Y for the compact player: any height, fixed horizontal center.
+     * Older installations had only top/bottom; migrate their choice on first read.
+     * Stored in q7h_compose preferences and included in existing backups. */
+    var readerPlayerRowY: Float
+        get() = if (p.contains("reader_player_row_y_v13"))
+            p.getFloat("reader_player_row_y_v13", 1f)
+                .takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 1f
+        else if (readerPlayerRowTop) 0f else 1f
+        set(value) { p.edit().putFloat("reader_player_row_y_v13",
+            value.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 1f).apply() }
+
+    /** Playback overlay never changes saved ink. SharedPreferences is included in Q7H backups. */
+    var readerPlaybackHighlightMode: String
+        get() = p.getString("reader_playback_highlight_v12", "replace")
+            ?.takeIf { it in setOf("replace", "keep") } ?: "replace"
+        set(value) { if (value in setOf("replace", "keep")) {
+            p.edit().putString("reader_playback_highlight_v12", value).apply()
+            touchSmartSettings()
+        } }
+
+    /** The transient playback marker is independent from the user's saved ink color.
+     * Kept in q7h_compose.xml so existing ZIP exports/restores preserve it. */
+    var readerPlaybackHighlightColor: Long
+        get() = (p.getLong("reader_playback_highlight_color_v14", 0xFFD8C5A6L)
+            and 0xFFFFFFFFL) or 0xFF000000L
+        set(value) {
+            p.edit().putLong("reader_playback_highlight_color_v14",
+                (value and 0xFFFFFFL) or 0xFF000000L).apply()
+            touchSmartSettings()
+        }
+
+    /** Retain the latest custom RGB so users can switch back to it without
+     * re-entering channels. This preference is included in the backup too. */
+    var readerPlaybackCustomColor: Long
+        get() = (p.getLong("reader_playback_custom_rgb_color_v14", 0xFFD8C5A6L)
+            and 0xFFFFFFFFL) or 0xFF000000L
+        set(value) {
+            p.edit().putLong("reader_playback_custom_rgb_color_v14",
+                (value and 0xFFFFFFL) or 0xFF000000L).apply()
+            touchSmartSettings()
+        }
 
     var inkSmartTapCount: Int
         get() = p.getInt("ink_smart_taps_v4", 2).coerceIn(1,2)

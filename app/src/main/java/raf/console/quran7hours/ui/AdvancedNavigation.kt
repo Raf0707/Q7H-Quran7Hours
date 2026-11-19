@@ -1,6 +1,7 @@
 package raf.console.quran7hours.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,6 +20,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.LayoutDirection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -337,6 +340,9 @@ internal fun PageJumpDialog(
     onGoAyah: (Int,Int) -> Unit
 ) {
     val context=LocalContext.current
+    val focusManager=LocalFocusManager.current
+    val keyboard=LocalSoftwareKeyboardController.current
+    val blankClicks=remember { MutableInteractionSource() }
     val pages=remember(context.applicationContext){QuranNavigationPageSource(context.applicationContext)}
     var mode by rememberSaveable { mutableStateOf("page") }
     var input by rememberSaveable(initialPage){mutableStateOf(initialPage.toString())}
@@ -375,8 +381,10 @@ internal fun PageJumpDialog(
             val ctx=androidx.compose.ui.platform.LocalContext.current
             Q7HBottomNavSettings.load(ctx)
             val lower=Q7HBottomNavSettings.enabled
-            Column(Modifier.fillMaxWidth().height(contentHeight),
-                verticalArrangement=Arrangement.spacedBy(7.dp)) {
+            Column(Modifier.fillMaxWidth().height(contentHeight)
+                .clickable(interactionSource=blankClicks,indication=null) {
+                    focusManager.clearFocus();keyboard?.hide()
+                },verticalArrangement=Arrangement.spacedBy(7.dp)) {
                 // Information stays at the TOP; controls are scrollable in the middle.
                 Surface(color=MaterialTheme.colorScheme.surfaceVariant,
                     shape=androidx.compose.foundation.shape.RoundedCornerShape(12.dp)) {
@@ -385,20 +393,51 @@ internal fun PageJumpDialog(
                 }
                 if (!lower) Q7HDialogNavModes(modes,mode) { mode=it }
                 Box(Modifier.fillMaxWidth().weight(1f)) {
-                    // This alignment fixes the "input at the top / tabs at the
-                    // bottom" gap on the Page tab. Ayah, Juz, Hizb and Manzil
-                    // use exactly the same bottom-anchored content region.
-                    Column(
-                        Modifier.fillMaxWidth().align(Alignment.BottomCenter)
-                            .heightIn(max=when(mode) {
-                                "page" -> 180.dp
-                                "ayah" -> 355.dp
-                                else -> 320.dp
-                            })
+                    if (mode in setOf("juz", "hizb", "manzil")) {
+                        // These sections are lists, NOT bottom-anchored input forms.
+                        // Start immediately below the top segments and use all
+                        // remaining space instead of leaving a large empty gap.
+                        val kind = when(mode) {
+                            "juz" -> NavKind.JUZ
+                            "hizb" -> NavKind.HIZB
+                            else -> NavKind.MANZIL
+                        }
+                        Column(Modifier.fillMaxSize(),
+                            verticalArrangement=Arrangement.spacedBy(7.dp)) {
+                            Text(when(mode) {
+                                "juz" -> "30 джузов · стрелка раскрывает четыре четверти"
+                                "hizb" -> "60 хизбов · стрелка раскрывает две половины"
+                                else -> "7 манзилей · переход в начало манзиля"
+                            },style=MaterialTheme.typography.labelSmall)
+                            NavigationNodes(kind,mode,initialPage,pages,onGo,onGoAyah,
+                                modifier=Modifier.fillMaxWidth().weight(1f),
+                                selectedNumber=when(kind) {
+                                    NavKind.JUZ->pages.v4.segmentForPage(QuranCatalog.Segment.JUZ,initialPage)
+                                    NavKind.HIZB->pages.v4.segmentForPage(QuranCatalog.Segment.HIZB,initialPage)
+                                    else->pages.v4.segmentForPage(QuranCatalog.Segment.MANZIL,initialPage)
+                                })
+                        }
+                    } else {
+                        // Page/Ayah fields remain next to the lower control strip.
+                        // The page table uses the rest of the available space.
+                        if (mode=="page") NavigationNodes(
+                            kind=NavKind.PAGE,
+                            mode="page",
+                            currentPage=page ?: initialPage,
+                            pages=pages,
+                            onPage={ selected ->
+                                input=selected.toString()
+                                focusManager.clearFocus(); keyboard?.hide()
+                            },
+                            onAyah={ s,a -> onGoAyah(s,a) },
+                            modifier=Modifier.fillMaxSize().padding(bottom=182.dp),
+                            selectedNumber=page ?: initialPage
+                        )
+                        Column(Modifier.fillMaxWidth().align(Alignment.BottomCenter)
+                            .heightIn(max=if(mode=="page") 180.dp else 355.dp)
                             .verticalScroll(rememberScrollState()),
-                        verticalArrangement=Arrangement.spacedBy(9.dp)
-                    ) {
-                when(mode){
+                            verticalArrangement=Arrangement.spacedBy(9.dp)) {
+                            when(mode){
                     "ayah" -> {
                         NavigationNumberDropdown("Сура",surah,114,
                             {"$it. ${QuranCatalog.surahNames[it-1]}"}){
@@ -444,23 +483,9 @@ internal fun PageJumpDialog(
                             onValue = { input = it.toString() }
                         )
                     }
-                    "juz","hizb","manzil" -> {
-                        val kind=when(mode){"juz"->NavKind.JUZ;"hizb"->NavKind.HIZB;else->NavKind.MANZIL}
-                        Text(when(mode){
-                            "juz"->"30 джузов · стрелка раскрывает четыре четверти"
-                            "hizb"->"60 хизбов · стрелка раскрывает две половины"
-                            else->"7 манзилей · переход в начало манзиля"
-                        },style=MaterialTheme.typography.labelSmall)
-                        NavigationNodes(kind,mode,initialPage,pages,onGo,onGoAyah,
-                            modifier=Modifier.height(260.dp),
-                            selectedNumber=when(kind){
-                                NavKind.JUZ->pages.v4.segmentForPage(QuranCatalog.Segment.JUZ,initialPage)
-                                NavKind.HIZB->pages.v4.segmentForPage(QuranCatalog.Segment.HIZB,initialPage)
-                                else->pages.v4.segmentForPage(QuranCatalog.Segment.MANZIL,initialPage)
-                            })
+                            }
+                        }
                     }
-                } // when(mode)
-                    } // bottom-aligned fields
                 } // weighted area
                 if (lower) Q7HDialogNavModes(modes,mode) { mode=it }
             }

@@ -1,5 +1,7 @@
 package raf.console.quran7hours.ui
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -833,6 +835,7 @@ internal fun AyahAudioControls(
     val reciterFocusManager = LocalFocusManager.current
     val reciterKeyboard = LocalSoftwareKeyboardController.current
     var reciterMenu by remember { mutableStateOf(false) }
+    var personEditor by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf("") }
     var dragging by remember { mutableStateOf(false) }
     var fraction by remember { mutableFloatStateOf(0f) }
@@ -864,7 +867,11 @@ internal fun AyahAudioControls(
         Q7HSliderDirections.get(miniContext.applicationContext)
     }
     val miniRtl = miniMode && miniDirection.rtl(Q7HSliderKeys.AYAH_MINI)
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+    Row(
+        modifier=if(miniMode) Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()) else Modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
         IconButton(onClick = {
             // When the service has advanced to another reciter, pausing must NOT
             // unexpectedly restart the first voice chosen in MainActivity.
@@ -905,7 +912,7 @@ internal fun AyahAudioControls(
                         if (duration > 0) controller?.seekTo((fraction * duration).roundToLong())
                         dragging = false
                     }, enabled = duration > 0,
-                    modifier = Modifier.width(86.dp))
+                    modifier = Modifier.width(if(miniMode) 62.dp else 86.dp))
             }
             if (miniMode) {
                 val second = if (miniRtl) onPreviousVerse else onNextVerse
@@ -926,15 +933,19 @@ internal fun AyahAudioControls(
                     // Entering Person mode never changes the personal choice. Abu Bakr ash-Shatri is the default if no choice was made.
                     nextMode == AyahEndMode.ALL_RECITERS -> {
                         val preferred = preferredForPerson()
-                        if (preferred != null) {
-                            prefs.reciterBeforeAllMode = preferred.repository
+                        val selectedForPerson = raf.console.quran7hours.media.Q7HPersonQueue.enabled(
+                            reciters, raf.console.quran7hours.media.Q7HPersonQueue.preferences(miniContext))
+                        if (selectedForPerson.isEmpty()) {
+                            personEditor = true
+                        } else {
+                            if (preferred != null) prefs.reciterBeforeAllMode = preferred.repository
                             prefs.personNeedsFirstPlay = !playback.playing
-                            if (selectedReciter != preferred.repository ||
-                                (playback.playing && idParts.getOrNull(3) != preferred.repository)) {
-                                onReciter(preferred.repository)
+                            onEndMode(nextMode)
+                            if (idParts.getOrNull(3) != selectedForPerson.first().repository ||
+                                selectedReciter != selectedForPerson.first().repository) {
+                                onReciter(selectedForPerson.first().repository)
                             }
                         }
-                        onEndMode(nextMode)
                     }
                     // LEAVING Person mode restores user preference AND Media3 audio.
                     endMode == AyahEndMode.ALL_RECITERS -> {
@@ -959,15 +970,23 @@ internal fun AyahAudioControls(
                     Icon(when (endMode) {
                         AyahEndMode.STOP -> Icons.Default.StopCircle
                         AyahEndMode.REPEAT -> Icons.Default.RepeatOne
-                        AyahEndMode.NEXT -> Icons.Default.SkipNext
+                        AyahEndMode.NEXT -> Icons.Default.PlaylistPlay
                         AyahEndMode.ALL_RECITERS -> Icons.Default.Person // Person WITHOUT the circle.
                         AyahEndMode.REPEAT_N -> Icons.Default.RepeatOne
                     }, endMode.title, tint = MaterialTheme.colorScheme.primary)
                 }
             }
         }
+        // PERSON pencil and reciter avatar MUST be siblings in this Row.
+        // Previously both buttons occupied the same Box and visually overlapped.
+        if (endMode == AyahEndMode.ALL_RECITERS) {
+            IconButton(onClick = { personEditor = true }, modifier=Modifier.size(40.dp)) {
+                Icon(Icons.Default.Edit, "Выбрать чтецов и порядок PERSON",
+                    modifier=Modifier.size(22.dp), tint=MaterialTheme.colorScheme.primary)
+            }
+        }
         Box {
-            IconButton(onClick = { reciterMenu = true }) {
+            IconButton(onClick = { reciterMenu = true }, modifier=Modifier.size(40.dp)) {
                 Icon(
                     Icons.Default.AccountCircle,
                     "Профиль чтеца: ${currentReciter?.title ?: "не выбран"}",
@@ -982,6 +1001,14 @@ internal fun AyahAudioControls(
                 modifier = Modifier.heightIn(max = 370.dp)) {
                 Text("Выберите чтеца", modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.titleSmall)
+                if (endMode == AyahEndMode.ALL_RECITERS) {
+                    DropdownMenuItem(text = { Text("PERSON · участники и порядок") },
+                        leadingIcon = { Icon(Icons.Default.Edit,null) },onClick = {
+                            reciterMenu=false; personEditor=true
+                            reciterFocusManager.clearFocus();reciterKeyboard?.hide()
+                        })
+                    HorizontalDivider()
+                }
                 if (reciters.isEmpty()) Text(reciterError.ifBlank { "Загрузка 43 чтецов…" },
                     modifier = Modifier.padding(12.dp), color = MaterialTheme.colorScheme.error)
                 else {
@@ -1019,6 +1046,7 @@ internal fun AyahAudioControls(
             }
         }
     }
+    if (personEditor) Q7HPersonReciterEditor(reciters) { personEditor = false }
 }
 /** Positions of all editable fields, measured in window coordinates. */
 private class Q7HSettingsFocusTracker {
@@ -1044,6 +1072,7 @@ fun SettingsPanel(
     autoFlip: Boolean, setAutoFlip: (Boolean) -> Unit,
     keepAwake: Boolean, setKeepAwake: (Boolean) -> Unit,
     separateHafiz: Boolean, setSeparateHafiz: (Boolean) -> Unit,
+    reciters: List<Reciter>,
     mushaf: MushafStore
 ) {
     val scroll = rememberScrollState(initial = prefs.panelViewport("settings").second)
@@ -1051,6 +1080,7 @@ fun SettingsPanel(
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val textFocus = remember { Q7HSettingsFocusTracker() }
+    val blankTapSource = remember { MutableInteractionSource() }
     var settingsCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     // Listening at the Initial pass does NOT consume taps or disrupt sliders/buttons.
     // Check the active field's actual bounds to allow caret placement INSIDE it.
@@ -1068,7 +1098,10 @@ fun SettingsPanel(
                 }
             }
         }
-    Column(Modifier.fillMaxSize().then(clearOnOutsideTap).verticalScroll(scroll).padding(16.dp),
+    Column(Modifier.fillMaxSize().then(clearOnOutsideTap)
+        .clickable(interactionSource=blankTapSource, indication=null) {
+            focusManager.clearFocus(); keyboard?.hide()
+        }.verticalScroll(scroll).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(13.dp)) {
         // Q7H_TAJWEED_LEGEND: permanent, read-only QPC V4 reference before theme.
         Q7HTajweedColorLegend(
@@ -1165,9 +1198,11 @@ fun SettingsPanel(
         }
         // Separate stored limits. They do not reset text/tajweed preferences.
         HorizontalDivider()
+        Q7HPersonSettingsButton(reciters)
+        HorizontalDivider()
         Text("Повторения при прослушивании", style = MaterialTheme.typography.titleMedium)
         Q7HRepeatCountSetting(
-            title = "Каждый из 43 чтецов — повторов одного аята",
+            title = "PERSON: повторов одного аята каждым выбранным чтецом",
             value = prefs.allRecitersRepeatCount,
             default = 1,
             onSave = { prefs.allRecitersRepeatCount = it },

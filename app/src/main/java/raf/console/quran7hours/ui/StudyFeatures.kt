@@ -285,7 +285,8 @@ internal fun BookmarkTypeEditor(
         onDismissRequest = onDismiss,
         title = { Text(if (initial == null) "Своя закладка" else "Редактировать закладку") },
         text = {
-            Column(modifier=Modifier.fillMaxWidth().heightIn(max=535.dp)) {
+            Column(modifier=Modifier.fillMaxWidth().heightIn(max=535.dp)
+                .q7hClearFocusOnBackgroundTap()) {
                 if (!tabsAtBottom) Q7HBookmarkModeTabs(functional) { functional=it }
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState()),
                     verticalArrangement=Arrangement.spacedBy(10.dp)) {
@@ -496,7 +497,8 @@ internal fun LearningNoteEditor(
             QuranCatalog.isValidAyah(s, a2) && a1 <= a2
     }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Заметка") }, text = {
-        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.q7hClearFocusOnBackgroundTap().verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(value = title, onValueChange = { title = it.take(160) },
                 label = { Text("Название") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(value = text, onValueChange = { text = it },
@@ -697,6 +699,7 @@ internal fun InkPageLayer(
     editable: Boolean,
     coverColor: Color,
     darkPage: Boolean,
+    transientHighlights: List<InkStroke> = emptyList(),
     modifier: Modifier = Modifier
 ) {
     val active = remember(strokes) { mutableStateListOf<InkPoint>() }
@@ -900,7 +903,32 @@ internal fun InkPageLayer(
         }
         val draftStroke = if (inProgress && active.isNotEmpty())
             InkStroke(tool, inkColor, width, active.toList()) else null
-        val onPage = strokes.toList() + listOfNotNull(draftStroke)
+        // Playback markers are display-only. Never mutate or save them in Room:
+        // changing a verse or stopping Media3 removes this overlay immediately.
+        // The selected verse is stored in Room as smart:sura:ayah:page; its
+        // temporary playback overlay has playback:sura:ayah:page.  Never delete,
+        // recolor, or save either marker here: this is a display-only decision.
+        val activePlayedTags = transientHighlights.asSequence()
+            .map { it.text }
+            .filter { it.startsWith("playback:") }
+            .map { "smart:" + it.removePrefix("playback:") }
+            .toSet()
+        val existingSmartTags = strokes.asSequence()
+            .filter { it.tool == "smart_marker" && it.text in activePlayedTags }
+            .map { it.text }.toSet()
+        // Default: replace the already-colored ayah with beige WHILE audible.
+        // Alternative: retain its original color; do not add beige on top.
+        val replaceSaved = smartPrefs.readerPlaybackHighlightMode == "replace"
+        val visibleSaved = if (replaceSaved && existingSmartTags.isNotEmpty())
+            strokes.filterNot { it.tool == "smart_marker" && it.text in existingSmartTags }
+        else strokes.toList()
+        val visiblePlayback = if (!replaceSaved && existingSmartTags.isNotEmpty())
+            transientHighlights.filterNot { temporary ->
+                temporary.text.startsWith("playback:") &&
+                    ("smart:" + temporary.text.removePrefix("playback:")) in existingSmartTags
+            }
+        else transientHighlights
+        val onPage = visibleSaved + listOfNotNull(draftStroke) + visiblePlayback
         // A single-layer marker means ONE alpha mask per ARGB color across all
         // strokes using either one-layer variant. Touching/overlapping strokes
         // remain equally translucent; they cannot darken each other.

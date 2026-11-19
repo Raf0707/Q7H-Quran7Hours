@@ -48,15 +48,18 @@ internal fun Q7HReaderFloatingPlayer(
     onClose: () -> Unit
 ) {
     val density = LocalDensity.current
+    val playerContext = androidx.compose.ui.platform.LocalContext.current
     var display by remember { mutableStateOf(prefs.readerPlayerDisplay) }
     var fullX by remember { mutableFloatStateOf(prefs.readerPlayerFullX) }
     var fullY by remember { mutableFloatStateOf(prefs.readerPlayerFullY) }
     var squareX by remember { mutableFloatStateOf(prefs.readerPlayerSquareX) }
     var squareY by remember { mutableFloatStateOf(prefs.readerPlayerSquareY) }
-    var rowTop by remember { mutableStateOf(prefs.readerPlayerRowTop) }
+    // Keep a continuous, normalized Y coordinate; unlike the legacy rowTop flag,
+    // this lets the compact player stop at any height while remaining on screen.
+    var rowY by remember { mutableFloatStateOf(prefs.readerPlayerRowY) }
     var measured by remember(display) { mutableStateOf(IntSize.Zero) }
-    var rowDrag by remember { mutableFloatStateOf(0f) }
     var reciterMenu by remember { mutableStateOf(false) }
+    var personEditor by remember { mutableStateOf(false) }
     var sliderDragging by remember { mutableStateOf(false) }
     var sliderFraction by remember { mutableFloatStateOf(0f) }
     val margin = with(density) { 14.dp.roundToPx() }
@@ -69,7 +72,7 @@ internal fun Q7HReaderFloatingPlayer(
     }
     val yPos = when (display) {
         "square" -> squareY
-        "row" -> if (rowTop) 0f else 1f
+        "row" -> rowY
         else -> fullY
     }
     val pixelX = margin + (travelX * xPos).roundToInt()
@@ -88,7 +91,12 @@ internal fun Q7HReaderFloatingPlayer(
                 prefs.readerPlayerSquareX = squareX
                 prefs.readerPlayerSquareY = squareY
             }
-            "row" -> { rowDrag += delta.y }
+            "row" -> {
+                // Only Y responds to the row grip: horizontal drag is ignored.
+                // Normalize by available travel so both top/bottom edges stay visible.
+                rowY = if (travelY > 0) (rowY + delta.y / travelY).coerceIn(0f, 1f)
+                    else .5f
+            }
             else -> {
                 fullX = if (travelX > 0) (fullX + delta.x / travelX).coerceIn(0f, 1f) else .5f
                 fullY = if (travelY > 0) (fullY + delta.y / travelY).coerceIn(0f, 1f) else .5f
@@ -97,15 +105,12 @@ internal fun Q7HReaderFloatingPlayer(
             }
         }
     }
-    fun snapRow() {
-        if (kotlin.math.abs(rowDrag) > with(density) { 22.dp.toPx() }) {
-            rowTop = rowDrag < 0f
-            prefs.readerPlayerRowTop = rowTop
-        }
-        rowDrag = 0f
+    fun finishDrag() {
+        // Save the EXACT intermediate height (not a snap to either edge).
+        if (display == "row") prefs.readerPlayerRowY = rowY
     }
     val grip = Modifier.pointerInput(display, hostSize, measured) {
-        detectDragGestures(onDragEnd = { snapRow() }, onDragCancel = { snapRow() }) { change, delta ->
+        detectDragGestures(onDragEnd = { finishDrag() }, onDragCancel = { finishDrag() }) { change, delta ->
             change.consume()
             move(delta)
         }
@@ -162,12 +167,13 @@ internal fun Q7HReaderFloatingPlayer(
                     }
                     "row" -> {
                         Row(Modifier.width(contentWidth).height(56.dp)
-                            .horizontalScroll(rememberScrollState())
                             .padding(start=4.dp,end=4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(0.dp)) {
-                            Icon(Icons.Default.DragHandle,"Переместить строку вверх или вниз",
-                                modifier=Modifier.size(24.dp).then(grip))
+                            verticalAlignment = Alignment.CenterVertically) {
+                            // Actions may scroll, but the right-hand drag handle must
+                            // stay visible even on a narrow phone.
+                            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(0.dp)) {
                             Text("${target.first}:${target.second}",fontSize=11.sp,
                                 maxLines=1,modifier=Modifier.padding(start=2.dp,end=2.dp))
                             IconButton(onClick={last?.let { onPlayVerse(it.first,it.second) }},
@@ -201,12 +207,16 @@ internal fun Q7HReaderFloatingPlayer(
                                     val preferred=reciters.firstOrNull {
                                         it.repository==prefs.manuallySelectedReciter
                                     } ?: reciters.firstOrNull { it.repository==selectedReciter }
-                                    if(preferred!=null) {
-                                        prefs.reciterBeforeAllMode=preferred.repository
+                                    val enabled=raf.console.quran7hours.media.Q7HPersonQueue.enabled(
+                                        reciters,raf.console.quran7hours.media.Q7HPersonQueue.preferences(playerContext))
+                                    if (enabled.isEmpty()) personEditor=true
+                                    else {
+                                        if(preferred!=null) prefs.reciterBeforeAllMode=preferred.repository
                                         prefs.personNeedsFirstPlay=!playback.playing
-                                        if(preferred.repository!=selectedReciter)onReciter(preferred.repository)
+                                        onEndMode(nextMode)
+                                        if(enabled.first().repository!=selectedReciter)
+                                            onReciter(enabled.first().repository)
                                     }
-                                    onEndMode(nextMode)
                                 } else if(endMode==AyahEndMode.ALL_RECITERS) {
                                     val original=reciters.firstOrNull {
                                         it.repository==prefs.reciterBeforeAllMode
@@ -216,15 +226,28 @@ internal fun Q7HReaderFloatingPlayer(
                                     if(original!=null) onReciter(original.repository)
                                     prefs.reciterBeforeAllMode=""
                                 } else onEndMode(nextMode)
-                            },modifier=Modifier.size(30.dp)) {
+                            },modifier=Modifier.size(30.dp).then(
+                                if (endMode==AyahEndMode.NEXT) Modifier.background(
+                                    MaterialTheme.colorScheme.primaryContainer,
+                                    RoundedCornerShape(8.dp)) else Modifier
+                            )) {
                                 if(endMode==AyahEndMode.REPEAT_N) Text("N",fontSize=16.sp)
                                 else Icon(when(endMode) {
                                     AyahEndMode.STOP -> Icons.Default.StopCircle
                                     AyahEndMode.REPEAT -> Icons.Default.RepeatOne
-                                    AyahEndMode.NEXT -> Icons.Default.SkipNext
+                                    AyahEndMode.NEXT -> Icons.Default.PlaylistPlay
                                     AyahEndMode.ALL_RECITERS -> Icons.Default.Person
                                     AyahEndMode.REPEAT_N -> Icons.Default.RepeatOne
-                                },endMode.title,Modifier.size(21.dp))
+                                },endMode.title,Modifier.size(21.dp),
+                                    tint=if(endMode==AyahEndMode.NEXT)
+                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                        else MaterialTheme.colorScheme.onSurface)
+                            }
+                            if (endMode==AyahEndMode.ALL_RECITERS) {
+                                IconButton(onClick={personEditor=true}, modifier=Modifier.size(30.dp)) {
+                                    Icon(Icons.Default.Edit, "Настроить очередь PERSON",Modifier.size(20.dp),
+                                        tint=MaterialTheme.colorScheme.primary)
+                                }
                             }
                             Box {
                                 IconButton(onClick={reciterMenu=true},modifier=Modifier.size(30.dp)) {
@@ -232,6 +255,12 @@ internal fun Q7HReaderFloatingPlayer(
                                 }
                                 DropdownMenu(expanded=reciterMenu,onDismissRequest={reciterMenu=false}) {
                                     Column(Modifier.heightIn(max=380.dp).verticalScroll(rememberScrollState())) {
+                                        if (endMode==AyahEndMode.ALL_RECITERS) {
+                                            DropdownMenuItem(text={Text("PERSON · участники и порядок")},
+                                                leadingIcon={Icon(Icons.Default.Edit,null)},
+                                                onClick={reciterMenu=false;personEditor=true})
+                                            HorizontalDivider()
+                                        }
                                         if(reciters.isEmpty()) DropdownMenuItem(
                                             text={Text(reciterError.ifBlank {"Чтецы загружаются"})},onClick={reciterMenu=false})
                                         reciters.forEach { voice ->
@@ -251,21 +280,19 @@ internal fun Q7HReaderFloatingPlayer(
                             IconButton(onClick={mode("full")},modifier=Modifier.size(30.dp)) {
                                 Icon(Icons.Default.UnfoldMore,"Развернуть плеер",Modifier.size(21.dp))
                             }
-                            IconButton(onClick={mode("square")},modifier=Modifier.size(30.dp)) {
-                                Icon(Icons.Default.CloseFullscreen,"Свернуть в квадрат",Modifier.size(19.dp))
-                            }
                             IconButton(onClick=onClose,modifier=Modifier.size(30.dp)) {
                                 Icon(Icons.Default.Close,"Закрыть и остановить",Modifier.size(21.dp))
+                            }
+                            } // scrollable row controls
+                            Box(Modifier.size(32.dp).then(grip),contentAlignment=Alignment.Center) {
+                                Icon(Icons.Default.DragHandle,"Переместить строку вверх или вниз",Modifier.size(25.dp))
                             }
                         }
                     }
                     else -> {
                         Column(Modifier.width(contentWidth).padding(start=5.dp,end=5.dp,top=3.dp,bottom=5.dp)) {
                             Row(verticalAlignment=Alignment.CenterVertically) {
-                                Icon(Icons.Default.DragHandle,"Перетащить плеер",
-                                    modifier=Modifier.size(36.dp).then(grip))
-                                Text("Плеер аятов",style=MaterialTheme.typography.labelSmall,
-                                    modifier=Modifier.weight(1f))
+                                Spacer(Modifier.weight(1f))
                                 IconButton(onClick={mode("row")},modifier=Modifier.size(32.dp)) {
                                     Icon(Icons.Default.UnfoldLess,"Свернуть в строку",Modifier.size(20.dp))
                                 }
@@ -274,6 +301,9 @@ internal fun Q7HReaderFloatingPlayer(
                                 }
                                 IconButton(onClick=onClose,modifier=Modifier.size(32.dp)) {
                                     Icon(Icons.Default.Close,"Закрыть и остановить",Modifier.size(20.dp))
+                                }
+                                Box(Modifier.size(36.dp).then(grip),contentAlignment=Alignment.Center) {
+                                    Icon(Icons.Default.DragHandle,"Перетащить плеер",Modifier.size(27.dp))
                                 }
                             }
                             Q7HAyahMiniPlayer(target=target,playback=playback,controller=controller,
@@ -287,4 +317,5 @@ internal fun Q7HReaderFloatingPlayer(
             }
         }
     }
+    if (personEditor) Q7HPersonReciterEditor(reciters) { personEditor=false }
 }

@@ -281,7 +281,8 @@ internal fun Q7HInkColorEditor(
     AlertDialog(onDismissRequest = onDismiss,
         title = { Text(if (initial == null) "Новый цвет" else "Изменить цвет") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.q7hClearFocusOnBackgroundTap(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Surface(color = Color(pack().toInt()), shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth().height(38.dp),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)) {}

@@ -386,8 +386,11 @@ internal fun Q7HFloatingMushafToolbar(
     var draftX by remember(mode) { mutableFloatStateOf(store.offsetX[mode] ?: 0f) }
     var draftY by remember(mode) { mutableFloatStateOf(store.offsetY[mode] ?: 0f) }
     var positionAlignment by remember(mode) {
-        mutableStateOf(store.alignments[mode] ?: if(bottomEnabled)store.alignments[store.layout]
-            ?: Q7HBottomNavSettings.CENTER else Q7HBottomNavSettings.RIGHT)
+        // The ordinary (top) toolbar is always centered, regardless of a
+        // historical RIGHT alignment saved by older builds.
+        mutableStateOf(if (!bottomEnabled) Q7HBottomNavSettings.CENTER
+            else store.alignments[mode] ?: store.alignments[store.layout]
+                ?: Q7HBottomNavSettings.CENTER)
     }
     var measured by remember(mode) { mutableStateOf(IntSize.Zero) }
     LaunchedEffect(mode,store.offsetX[mode],store.offsetY[mode],store.alignments[mode]) {
@@ -409,12 +412,15 @@ internal fun Q7HFloatingMushafToolbar(
         val bottomEdge=(canvasH-partH).coerceAtLeast(0f)
         val startX=when {
             mode==Q7HBottomNavSettings.FULL_WIDTH -> 0f
+            // Legacy top navigation has no horizontal alignment adjustment.
+            mode==Q7HBottomNavSettings.LEGACY_TOP -> rightEdge/2f
             positionAlignment==Q7HBottomNavSettings.LEFT -> 0f
             positionAlignment==Q7HBottomNavSettings.RIGHT -> rightEdge
             else -> rightEdge/2f
         }
         val startY=if(isBottom) bottomEdge else 0f
-        val x=(startX+if(unrestricted)draftX else 0f).coerceIn(0f,rightEdge)
+        val x=(startX+if(unrestricted && mode!=Q7HBottomNavSettings.LEGACY_TOP)
+            draftX else 0f).coerceIn(0f,rightEdge)
         val y=(startY+if(unrestricted)draftY else 0f).coerceIn(0f,bottomEdge)
         fun commit() {
             store.savePosition(ctx,mode,x-startX,y-startY)

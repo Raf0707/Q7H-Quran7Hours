@@ -141,7 +141,8 @@ internal object Q7HBackupManager {
                         "smart_marker_independent_add_remove_gestures",
                         "smart_marker_hold_countdown_seconds_and_position",
                         "ink_palette_compact_tajweed_neutral_and_user_colors",
-                        "smart_ayah_annotation_identity_for_selective_erasing")
+                        "smart_ayah_annotation_identity_for_selective_erasing",
+                        "person_selected_reciters_and_custom_playback_order")
                         .forEach { put(it) }
                 })
             val files=JSONArray()

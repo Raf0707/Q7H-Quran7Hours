@@ -34,7 +34,8 @@ internal fun Q7HHadrRangeDialog(
     val b=until.toIntOrNull()
     val valid=a!=null && b!=null && a in 1..total && b in 1..total && a<=b
     AlertDialog(onDismissRequest=onDismiss,title={Text("Отрезок · $title")},
-        text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
+        text={Column(Modifier.q7hClearFocusOnBackgroundTap(),
+            verticalArrangement=Arrangement.spacedBy(8.dp)){
             Q7HNumericRangeField(from,{from=it},"От (1–$total)")
             Q7HNumericRangeField(until,{until=it},"До (1–$total)")
             Text("Как проигрывать отрезок:",style=MaterialTheme.typography.labelMedium)
@@ -70,7 +71,8 @@ internal fun Q7HAyahRangeDialog(
         QuranCatalog.isValidAyah(s,a) && QuranCatalog.isValidAyah(t,b) &&
         (s<t || s==t && a<=b)
     AlertDialog(onDismissRequest=onDismiss,title={Text("Отрезок аятов")},
-        text={Column(Modifier.fillMaxWidth().heightIn(max=430.dp).verticalScroll(rememberScrollState()),
+        text={Column(Modifier.fillMaxWidth().heightIn(max=430.dp)
+            .q7hClearFocusOnBackgroundTap().verticalScroll(rememberScrollState()),
             verticalArrangement=Arrangement.spacedBy(6.dp)){
             Text("Первый аят",style=MaterialTheme.typography.labelMedium)
             Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){

@@ -227,6 +227,18 @@ private fun Quran7HoursScreen(activity: MainActivity) {
     var autoFlip by remember { mutableStateOf(prefs.autoFlip) }
     var keepAwake by remember { mutableStateOf(prefs.keepAwake) }
     var notice by remember { mutableStateOf("") }
+    var ayahFeedback by remember { mutableStateOf("") }
+    var ayahFeedbackSerial by remember { mutableIntStateOf(0) }
+    fun showBriefAyahFeedback(message: String) {
+        ayahFeedback = message
+        ayahFeedbackSerial++
+    }
+    LaunchedEffect(ayahFeedbackSerial) {
+        if (ayahFeedbackSerial > 0) {
+            delay(1200L)
+            ayahFeedback = ""
+        }
+    }
     var bookmarks by remember { mutableStateOf(learningDb.bookmarks()) }
     var bookmarkTypes by remember { mutableStateOf(learningDb.types()) }
     var learningNotes by remember { mutableStateOf(learningDb.notes()) }
@@ -418,6 +430,17 @@ private fun Quran7HoursScreen(activity: MainActivity) {
     val systemDark = isSystemInDarkTheme()
     val dark = when (themeMode) { "dark" -> true; "light" -> false; else -> systemDark }
     val variant = mushaf.variant(dark, tajweed)
+    // Highlight the currently audible verse with the exact same Q7H smart-marker
+    // geometry and settings used for double-tap selection. No permanent ink.
+    val audibleVerse = remember(ayahSnapshot.mediaId, ayahSnapshot.playing, ayahSnapshot.ended) {
+        val fields = ayahSnapshot.mediaId.split(':')
+        val surah = fields.getOrNull(1)?.toIntOrNull()
+        val ayah = fields.getOrNull(2)?.toIntOrNull()
+        if (ayahSnapshot.playing && !ayahSnapshot.ended && fields.firstOrNull()=="ayah" &&
+            surah!=null && ayah!=null && QuranCatalog.isValidAyah(surah,ayah))
+            Q7HSmartAyahMarker.Ref(surah,ayah)
+        else null
+    }
     // Live values prevent an asynchronous smart selection from writing to a
     // different page or theme after the reader turns pages / changes theme.
     val liveSmartPage = rememberUpdatedState(page)
@@ -694,11 +717,21 @@ private fun Quran7HoursScreen(activity: MainActivity) {
     }
 
     fun playVerse(surah: Int, verse: Int) {
-        val reciter = reciters.firstOrNull { it.repository == selectedReciter }
+        val reciter = if (ayahMode == AyahEndMode.ALL_RECITERS) {
+            val eligible=Q7HPersonQueue.enabled(reciters,
+                Q7HPersonQueue.preferences(context.applicationContext))
+            if (eligible.isEmpty()) {
+                notice="PERSON: выберите хотя бы одного чтеца в настройках";return
+            }
+            // A new PERSON series always starts with the first enabled voice.
+            eligible.first()
+        } else reciters.firstOrNull { it.repository == selectedReciter }
         if (reciter == null) { notice = "Выберите чтеца, проверьте подключение к сети"; return }
         if (ayahController == null) { notice = "Плеер аятов ещё подключается"; return }
         val mediaId = "ayah:$surah:$verse:${reciter.repository}:${reciter.branch}"
-        if (ayahSnapshot.mediaId == mediaId) {
+        val samePersonVerse = ayahMode == AyahEndMode.ALL_RECITERS &&
+            ayahSnapshot.mediaId.startsWith("ayah:$surah:$verse:")
+        if (ayahSnapshot.mediaId == mediaId || samePersonVerse) {
             if (ayahSnapshot.playing) ayahController?.pause()
             else {
                 if (ayahSnapshot.ended) ayahController?.seekTo(0L)
@@ -922,6 +955,7 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                     ) { index ->
                         val leafPage = index + 1
                         val leafStrokes = remember(leafPage) { strokesForPage(leafPage) }
+                        val hiddenInkStrokes = remember(leafPage) { mutableStateListOf<InkStroke>() }
                         val bitmap by produceState<android.graphics.Bitmap?>(null, index, variant) {
                             // An asset pack may finish extracting AFTER this page first appears.
                             // Do not permanently render "missing page" after one failed lookup.
@@ -935,6 +969,34 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                 kotlinx.coroutines.delay(retryDelay)
                                 retryDelay = (retryDelay * 2L).coerceAtMost(30_000L)
                             }
+                        }
+                        // Playback overlay is ephemeral: use Q7H Stage12 verse
+                        // rectangles for this physical page, respecting theme,
+                        // letter/harakat bounds, radius and border preferences.
+                        // Also observe the editor's preference revision so picking a
+                        // playback color updates the visible verse without restarting audio.
+                        val playbackColorRevision = prefs.inkSmartSettingsRevision
+                        val playbackMarkerColor = prefs.readerPlaybackHighlightColor
+                        val audibleHighlight by produceState<List<InkStroke>>(
+                            emptyList(), bitmap, leafPage, variant, audibleVerse,
+                            playbackMarkerColor, playbackColorRevision
+                        ) {
+                            val image = bitmap
+                            val ref = audibleVerse
+                            value = if (image == null || ref == null) emptyList() else
+                                withContext(Dispatchers.Default) {
+                                    if (!Q7HSmartAyahV10.includes(context.applicationContext, leafPage, ref))
+                                        emptyList()
+                                    else runCatching {
+                                        Q7HSmartAyahV10.select(
+                                            context.applicationContext, mushaf, variant,
+                                            image, leafPage, 0f, 0f,
+                                            playbackMarkerColor, ref
+                                        )?.strokes.orEmpty().map { mark ->
+                                            mark.copy(text="playback:${ref.surah}:${ref.ayah}:$leafPage")
+                                        }
+                                    }.getOrDefault(emptyList())
+                                }
                         }
                         LaunchedEffect(bitmap, page, variant) {
                             if (index + 1 == page && bitmap != null) {
@@ -966,11 +1028,12 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Fit
                                 )
-                                if (showInk) {
+                                if (showInk || audibleHighlight.isNotEmpty()) {
                                     val inkBackdrop = remember(bitmap) { Color(mushaf.backdropColor(bitmap!!)) }
                                     InkPageLayer(
                                         bitmap = bitmap!!,
-                                        strokes = leafStrokes,
+                                        strokes = if (showInk) leafStrokes else hiddenInkStrokes,
+                                        transientHighlights = audibleHighlight,
                                         tool = inkTool,
                                         inkColor = inkColor,
                                         width = inkSize,
@@ -979,7 +1042,7 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                         coverColor = inkBackdrop,
                                         darkPage = dark,
                                         smartPrefs = prefs,
-                                        readerSmartGestures = !inkEditing && leafPage == page,
+                                        readerSmartGestures = showInk && !inkEditing && leafPage == page,
                                         readerEraser = !inkEditing && readerEraser && leafPage == page,
                                         onSingleTap = {
                                             if(!inkEditing && leafPage==page) {
@@ -1014,7 +1077,7 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                                 val originalEnvironment=smartEnvironment
                                                 val tappedBitmap=bitmap ?: return@launch
                                                 val originalColor=if (inkEditing) inkColor else 0xFF999999L
-                                                notice="Определяю строки и границы аята…"
+                                                // Geometry resolves asynchronously; success gets a brief snackbar.
                                                 val selected=withContext(Dispatchers.Default) {
                                                     runCatching { Q7HSmartAyahV10.select(context.applicationContext,
                                                         mushaf,originalVariant,tappedBitmap,originalPage,
@@ -1059,7 +1122,7 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                                         smartRedoAfter=null;smartRedoBefore=null
                                                         inkCheckpoint=inkStrokes.toList()
                                                         readerAyah=null
-                                                        notice="Выделение аята ${selected.ref.surah}:${selected.ref.ayah} снято"
+                                                        showBriefAyahFeedback("Снято · ${selected.ref.surah}:${selected.ref.ayah}")
                                                         return@launch
                                                     }
                                                     val resolvedColor=savedColor?:originalColor
@@ -1122,7 +1185,7 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                                         readerEraser=false
                                                         controlsVisible=false
                                                     }
-                                                    notice="Выделен аят ${selected.ref.surah}:${selected.ref.ayah}"
+                                                    showBriefAyahFeedback("Выделен · ${selected.ref.surah}:${selected.ref.ayah}")
                                                 }
                                             }
                                         },
@@ -1217,7 +1280,7 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                                     inkCheckpoint=inkStrokes.toList()
                                                     if(!inkEditing && readerAyah?.surah==ref.surah && readerAyah?.ayah==ref.ayah)
                                                         readerAyah=null
-                                                    notice="Удалено умное выделение аята ${ref.surah}:${ref.ayah}"
+                                                    showBriefAyahFeedback("Снято · ${ref.surah}:${ref.ayah}")
                                                 }
                                             }
                                         },
@@ -1650,6 +1713,20 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                         }
                     }
                 }
+                AnimatedVisibility(
+                    visible = ayahFeedback.isNotBlank(),
+                    enter = fadeIn(), exit = fadeOut(),
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                        .padding(start=20.dp, end=20.dp,
+                            bottom=if(readerAyah!=null) 148.dp else 75.dp)
+                ) {
+                    Snackbar(
+                        modifier = Modifier.widthIn(max=320.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        containerColor = MaterialTheme.colorScheme.inverseSurface,
+                        contentColor = MaterialTheme.colorScheme.inverseOnSurface
+                    ) { Text(ayahFeedback, style=MaterialTheme.typography.bodySmall) }
+                }
                 if (notice.isNotBlank()) {
                     Surface(
                         modifier = Modifier.align(Alignment.TopCenter)
@@ -1953,6 +2030,7 @@ private fun Quran7HoursScreen(activity: MainActivity) {
                                 prefs.separateHafizPlayer=enabled
                             }
                         },
+                        reciters = reciters,
                         mushaf = mushaf
                     )
                     null -> Unit

@@ -273,7 +273,7 @@ class PlaybackService : MediaSessionService() {
                 }
             }
         }.distinctBy { it.repository }
-    }.getOrDefault(emptyList())
+    }.getOrDefault(emptyList()).let { all -> Q7HPersonQueue.enabled(all, hadrPrefs) }
 
     /** Consume a verse-ended event when the range player is active. */
     private fun onAyahRangeFinished(error: Boolean): Boolean {
@@ -317,9 +317,9 @@ class PlaybackService : MediaSessionService() {
         if (mode == AyahEndMode.ALL_RECITERS) {
             val all=orderedReciters()
             val at=all.indexOfFirst { it.repository == fields[3] && it.branch == fields[4] }
-            if (at>=0 && ayahState.rangeReciter+1<all.size) {
+            if (all.isNotEmpty() && (at < 0 || at + 1 < all.size)) {
+                val nextReciter = all[if (at < 0) 0 else at + 1]
                 ayahState.rangeReciter++
-                val nextReciter=all[(at+1) % all.size]
                 playRangeVerse(startS,startA,nextReciter.repository,nextReciter.branch)
                 return true
             }
@@ -377,11 +377,14 @@ class PlaybackService : MediaSessionService() {
         val order = orderedReciters()
         val currentIndex = order.indexOfFirst { it.repository == parts[3] && it.branch == parts[4] }
         ayahState.recitersCompleted++
-        if (order.isEmpty() || currentIndex < 0 || ayahState.recitersCompleted >= order.size) {
+        if (order.isEmpty() || (currentIndex >= 0 && currentIndex + 1 >= order.size) ||
+            ayahState.recitersCompleted >= order.size) {
             resetAyahCycle()
-            return // Each available reciter has read the verse exactly N times.
+            return // Each selected reciter has read the verse exactly N times.
         }
-        val next = order[(currentIndex + 1) % order.size]
+        // If the playing voice has just been unchecked, continue at the first
+        // enabled voice instead of accidentally including an unchecked reciter.
+        val next = order[if (currentIndex < 0) 0 else currentIndex + 1]
         val mediaId = "ayah:$surah:$verse:${next.repository}:${next.branch}"
         ayahState.internalTransition = true
         ayah.setMediaItem(MediaItem.Builder().setMediaId(mediaId)
